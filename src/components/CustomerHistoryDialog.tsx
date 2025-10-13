@@ -20,7 +20,7 @@ interface Sale {
   invoice_number: string;
   grand_total: number;
   amount_paid: number;
-  payment_status: string;
+  order_status: string;
   payment_method: string;
   created_at: string;
   items: SaleItem[];
@@ -60,7 +60,7 @@ export const CustomerHistoryDialog = ({ open, onOpenChange, customer }: Customer
           invoice_number,
           grand_total,
           amount_paid,
-          payment_status,
+          order_status,
           payment_method,
           created_at
         `)
@@ -109,7 +109,7 @@ export const CustomerHistoryDialog = ({ open, onOpenChange, customer }: Customer
 
   // Calculate totals for all orders and paid orders
   const totalOrders = sales.length;
-  const paidOrders = sales.filter(sale => sale.payment_status === 'paid');
+  const paidOrders = sales.filter(sale => sale.order_status === 'paid');
   const successfulOrders = paidOrders.length;
   const totalSpent = paidOrders.reduce((sum, sale) => sum + sale.grand_total, 0);
   const avgOrderValue = successfulOrders > 0 ? totalSpent / successfulOrders : 0;
@@ -212,9 +212,9 @@ export const CustomerHistoryDialog = ({ open, onOpenChange, customer }: Customer
                             <div className="text-lg font-bold">{formatAmount(sale.grand_total)}</div>
                             <div className="flex gap-2">
                               <Badge 
-                                variant={sale.payment_status === 'paid' ? 'default' : 'secondary'}
+                                variant={sale.order_status === 'paid' ? 'default' : 'secondary'}
                               >
-                                {sale.payment_status}
+                                {sale.order_status}
                               </Badge>
                               <Badge variant="outline">
                                 {sale.payment_method}

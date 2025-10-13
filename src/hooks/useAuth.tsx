@@ -91,7 +91,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       
       toast({
         title: "Account created!",
-        description: "Welcome to your inventory management system.",
+        description: "Welcome to Rahestock inventory management system.",
       });
     } catch (error: any) {
       toast({

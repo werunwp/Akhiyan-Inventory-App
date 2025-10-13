@@ -35,6 +35,79 @@ export interface CreateProductData {
   has_variants?: boolean;
 }
 
+// Helper function to generate intelligent SKU
+const generateIntelligentSku = async (originalSku: string, supabase: any): Promise<string | null> => {
+  if (!originalSku || originalSku.trim() === '') {
+    return null;
+  }
+  
+  const base = originalSku.trim();
+  
+  // Strategy 1: Try to increment the last character
+  const lastChar = base.slice(-1);
+  const isNumeric = /^\d$/.test(lastChar);
+  
+  let candidate = '';
+  if (isNumeric) {
+    const numericPart = parseInt(lastChar);
+    if (numericPart < 9) {
+      candidate = base.slice(0, -1) + (numericPart + 1);
+    } else {
+      candidate = base + '1';
+    }
+  } else {
+    const charCode = lastChar.charCodeAt(0);
+    if (charCode >= 65 && charCode < 90) { // A to Y
+      candidate = base.slice(0, -1) + String.fromCharCode(charCode + 1);
+    } else {
+      candidate = base + '1';
+    }
+  }
+  
+  // Check if this candidate is unique
+  const { data: existingSku } = await supabase
+    .from("products")
+    .select("id")
+    .eq("sku", candidate)
+    .single();
+    
+  if (!existingSku) {
+    return candidate;
+  }
+  
+  // Strategy 2: Try adding single digits (1-9)
+  for (let i = 1; i <= 9; i++) {
+    const digitCandidate = base + i;
+    const { data: existingDigit } = await supabase
+      .from("products")
+      .select("id")
+      .eq("sku", digitCandidate)
+      .single();
+      
+    if (!existingDigit) {
+      return digitCandidate;
+    }
+  }
+  
+  // Strategy 3: Try adding single letters (A-Z)
+  for (let i = 65; i <= 90; i++) { // A to Z
+    const letterCandidate = base + String.fromCharCode(i);
+    const { data: existingLetter } = await supabase
+      .from("products")
+      .select("id")
+      .eq("sku", letterCandidate)
+      .single();
+      
+    if (!existingLetter) {
+      return letterCandidate;
+    }
+  }
+  
+  // Fallback: Add small random suffix (2-3 characters max)
+  const suffix = Math.random().toString(36).slice(2, 4).toUpperCase();
+  return base + suffix;
+};
+
 export const useProducts = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -60,9 +133,16 @@ export const useProducts = () => {
 
   const createProduct = useMutation({
     mutationFn: async (productData: CreateProductData) => {
+      // Convert empty SKU to null to avoid unique constraint issues
+      const processedData = {
+        ...productData,
+        sku: productData.sku?.trim() || null,
+        created_by: user?.id
+      };
+      
       const { data, error } = await supabase
         .from("products")
-        .insert([{ ...productData, created_by: user?.id }])
+        .insert([processedData])
         .select()
         .single();
 
@@ -80,9 +160,15 @@ export const useProducts = () => {
 
   const updateProduct = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<CreateProductData> }) => {
+      // Convert empty SKU to null to avoid unique constraint issues
+      const processedData = {
+        ...data,
+        sku: data.sku !== undefined ? (data.sku?.trim() || null) : undefined
+      };
+      
       const { data: updated, error } = await supabase
         .from("products")
-        .update(data)
+        .update(processedData)
         .eq("id", id)
         .select()
         .single();
@@ -161,10 +247,8 @@ export const useProducts = () => {
 
       if (productError) throw productError;
 
-      // Generate new SKU for the duplicated product
-      const base = (originalProduct.sku || '').toString().trim();
-      const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-      const newSku = `${base ? base : 'SKU'}-${suffix}`;
+      // Generate new SKU for the duplicated product using intelligent logic
+      const newSku = await generateIntelligentSku(originalProduct.sku || '', supabase);
 
       // Create the new product
       const { data: newProduct, error: createError } = await supabase

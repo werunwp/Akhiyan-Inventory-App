@@ -4,7 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Edit, Eye, TrendingUp, TrendingDown, DollarSign, RefreshCw, Truck, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
+import { Plus, Edit, Eye, TrendingUp, TrendingDown, DollarSign, RefreshCw, Truck, Trash2, Filter } from "lucide-react";
 import { format, startOfMonth, endOfMonth, isWithinInterval } from "date-fns";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSales } from "@/hooks/useSales";
@@ -132,8 +134,7 @@ interface Sale {
   customer_phone?: string;
   customer_address?: string;
   grand_total: number;
-  payment_status: string;
-  order_status?: string;
+  order_status: string;
   courier_status?: string;
   consignment_id?: string;
   last_status_check?: string;
@@ -142,6 +143,37 @@ interface Sale {
   amount_paid: number;
   amount_due: number;
 }
+
+// Helper function to get categorized order status based on courier status
+const getCategorizedOrderStatus = (courierStatus: string) => {
+  if (!courierStatus) {
+    console.log(`Status "${courierStatus}" categorized as: pending (empty)`);
+    return 'pending';
+  }
+  
+  const normalizedStatus = courierStatus.toLowerCase().trim();
+  
+  console.log(`Categorizing status: "${courierStatus}" -> normalized: "${normalizedStatus}"`);
+  
+  // Check for RETURN or PAID RETURN (any variation)
+  if (normalizedStatus.includes('return')) {
+    console.log(`Status "${courierStatus}" categorized as: cancelled (contains 'return')`);
+    return 'cancelled';
+  }
+  
+  // Check for DELIVERED, PARTIAL DELIVERY, and EXCHANGE
+  if (normalizedStatus.includes('delivered') || 
+      normalizedStatus.includes('partial') || 
+      normalizedStatus.includes('exchange')) {
+    console.log(`Status "${courierStatus}" categorized as: paid (contains 'delivered/partial/exchange')`);
+    return 'paid';
+  }
+  
+  // Default to pending for other statuses
+  console.log(`Status "${courierStatus}" categorized as: pending (default)`);
+  return 'pending';
+};
+
 
 export default function Sales() {
   const [showSaleDialog, setShowSaleDialog] = useState(false);
@@ -152,8 +184,12 @@ export default function Sales() {
   const [detailsSaleId, setDetailsSaleId] = useState<string | null>(null);
   const [courierSaleId, setCourierSaleId] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({});
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
   const [isRefreshingStatuses, setIsRefreshingStatuses] = useState(false);
   const [refreshingIndividual, setRefreshingIndividual] = useState<string | null>(null);
+  
+  const itemsPerPage = 20;
   
   const { formatAmount } = useCurrency();
   const queryClient = useQueryClient();
@@ -274,37 +310,41 @@ export default function Sales() {
       
       console.log('Status normalization:', { original: newStatus, normalized: normalizedStatus, display: displayStatus });
         
-      // Map courier status to payment status for business logic
-      let paymentStatusUpdate = {};
+      // Map courier status to order status for business logic
+      let orderStatusUpdate = {};
+      
       if (normalizedStatus.includes('delivered') || normalizedStatus.includes('completed')) {
-        paymentStatusUpdate = { payment_status: 'paid' };
-        console.log('Setting payment status to: paid');
+        orderStatusUpdate = { order_status: 'paid' };
+        console.log('Setting order status to: paid');
       } else if (normalizedStatus.includes('returned') || normalizedStatus.includes('cancelled') || 
                  normalizedStatus.includes('pickup_cancelled') || normalizedStatus.includes('pickup_cancel') || normalizedStatus.includes('lost')) {
-        paymentStatusUpdate = { payment_status: 'cancelled' };
-        console.log('Setting payment status to: cancelled');
+        orderStatusUpdate = { order_status: 'cancelled' };
+        console.log('Setting order status to: cancelled');
       } else {
         console.log('No payment status update needed for status:', normalizedStatus);
       }
       
+      // Apply categorization rules to order_status based on courier_status
+      const categorizedOrderStatus = getCategorizedOrderStatus(displayStatus);
+      orderStatusUpdate = { order_status: categorizedOrderStatus };
+      console.log(`Setting order status to: ${categorizedOrderStatus} based on courier status: ${displayStatus}`);
+      
       console.log('Payment status update object:', paymentStatusUpdate);
+      console.log('Order status update object:', orderStatusUpdate);
         
       // Update the sale in database
-      console.log('Updating sale in database with:', {
+      const updateData = {
         courier_status: displayStatus,
-        order_status: displayStatus,
         last_status_check: new Date().toISOString(),
-        paymentStatusUpdate
-      });
+        ...paymentStatusUpdate,
+        ...orderStatusUpdate
+      };
+      
+      console.log('Updating sale in database with:', updateData);
       
       const { error: updateError } = await supabase
         .from('sales')
-        .update({ 
-          courier_status: displayStatus,
-          order_status: displayStatus, // Keep for backward compatibility
-          last_status_check: new Date().toISOString(),
-          ...paymentStatusUpdate
-        })
+        .update(updateData)
         .eq('id', saleId);
 
       // If order is cancelled, restore inventory
@@ -372,22 +412,56 @@ export default function Sales() {
   };
 
   const filteredSales = useMemo(() => {
-    if (!dateRange.from && !dateRange.to) return sales;
+    let filtered = sales;
 
-    return sales.filter((sale) => {
-      const saleDate = new Date(sale.created_at);
-      
-      if (dateRange.from && dateRange.to) {
-        return isWithinInterval(saleDate, { start: dateRange.from, end: dateRange.to });
-      } else if (dateRange.from) {
-        return saleDate >= dateRange.from;
-      } else if (dateRange.to) {
-        return saleDate <= dateRange.to;
-      }
-      
-      return true;
-    });
-  }, [sales, dateRange]);
+    // Apply date range filter
+    if (dateRange.from || dateRange.to) {
+      filtered = filtered.filter((sale) => {
+        const saleDate = new Date(sale.created_at);
+        
+        if (dateRange.from && dateRange.to) {
+          return isWithinInterval(saleDate, { start: dateRange.from, end: dateRange.to });
+        } else if (dateRange.from) {
+          return saleDate >= dateRange.from;
+        } else if (dateRange.to) {
+          return saleDate <= dateRange.to;
+        }
+        
+        return true;
+      });
+    }
+
+    // Apply order status filter
+    if (orderStatusFilter !== "all") {
+      filtered = filtered.filter((sale) => {
+        const orderStatus = (sale.order_status || '').toLowerCase();
+        
+        switch (orderStatusFilter) {
+          case "paid":
+            return orderStatus === "paid";
+          case "cancelled":
+            return orderStatus === "cancelled";
+          case "pending":
+            return orderStatus === "pending" || orderStatus === "partial";
+          default:
+            return true;
+        }
+      });
+    }
+
+    return filtered;
+  }, [sales, dateRange, orderStatusFilter]);
+
+  // Pagination calculations
+  const totalSales = filteredSales.length;
+  const totalPages = Math.ceil(totalSales / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedSales = filteredSales.slice(startIndex, startIndex + itemsPerPage);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateRange, orderStatusFilter]);
 
   const currentMonthSales = useMemo(() => {
     const now = new Date();
@@ -401,16 +475,49 @@ export default function Sales() {
   }, [sales]);
 
   const stats = useMemo(() => {
-    const validSales = filteredSales.filter(sale => sale.payment_status !== 'cancelled');
-    const totalRevenue = validSales.reduce((sum, sale) => sum + (sale.grand_total || 0), 0);
-    const totalPaid = validSales.reduce((sum, sale) => sum + (sale.amount_paid || 0), 0);
-    const totalDue = validSales.reduce((sum, sale) => sum + (sale.amount_due || 0), 0);
+    // Helper function to determine if a sale should be excluded from Total Revenue
+    const isExcludedFromTotalRevenue = (sale: Sale) => {
+      const orderStatus = (sale.order_status || '').toLowerCase();
+      
+      // Exclude cancelled orders from Total Revenue
+      return orderStatus === 'cancelled';
+    };
+    
+    // Helper function to determine if a sale should be included in Amount Paid
+    const isIncludedInAmountPaid = (sale: Sale) => {
+      const orderStatus = (sale.order_status || '').toLowerCase();
+      
+      // Only paid orders count as Amount Paid
+      return orderStatus === 'paid';
+    };
+    
+    // Helper function to determine if a sale should be excluded from Amount Due
+    const isExcludedFromAmountDue = (sale: Sale) => {
+      const orderStatus = (sale.order_status || '').toLowerCase();
+      
+      // Exclude cancelled and paid orders from Amount Due
+      return orderStatus === 'cancelled' || orderStatus === 'paid';
+    };
+    
+    // Calculate Total Revenue: all orders excluding cancelled orders
+    const totalRevenueSales = filteredSales.filter(sale => !isExcludedFromTotalRevenue(sale));
+    const totalRevenue = totalRevenueSales.reduce((sum, sale) => sum + (sale.grand_total || 0), 0);
+    
+    // Calculate Amount Paid: only paid orders
+    const amountPaidSales = filteredSales.filter(sale => isIncludedInAmountPaid(sale));
+    const totalPaid = amountPaidSales.reduce((sum, sale) => sum + (sale.grand_total || 0), 0);
+    
+    // Calculate Amount Due: pending and partial orders (excluding cancelled and paid)
+    const amountDueSales = filteredSales.filter(sale => !isExcludedFromAmountDue(sale));
+    const totalDue = amountDueSales.reduce((sum, sale) => sum + (sale.amount_due || 0), 0);
     
     return {
       totalRevenue,
       totalPaid,
       totalDue,
-      totalSales: validSales.length
+      totalRevenueCount: totalRevenueSales.length,
+      amountPaidCount: amountPaidSales.length,
+      amountDueCount: amountDueSales.length
     };
   }, [filteredSales]);
 
@@ -461,12 +568,53 @@ export default function Sales() {
             Track your sales transactions and invoices
           </p>
         </div>
-        <div className="flex gap-2">
-          <SimpleDateRangeFilter onDateRangeChange={(from, to) => setDateRange({ from, to })} />
+        {/* Desktop Layout - All filters in one row */}
+        <div className="hidden md:flex gap-2">
+          <SimpleDateRangeFilter onDateRangeChange={(from, to) => setDateRange({ from, to })} defaultPreset="all" />
+          <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
+            <SelectTrigger className="w-[180px]">
+              <Filter className="mr-2 h-4 w-4" />
+              <SelectValue placeholder="Filter by status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Orders</SelectItem>
+              <SelectItem value="paid">Paid Orders</SelectItem>
+              <SelectItem value="pending">Pending Orders</SelectItem>
+              <SelectItem value="cancelled">Cancelled Orders</SelectItem>
+            </SelectContent>
+          </Select>
           <Button onClick={() => setShowSaleDialog(true)} className="w-fit">
             <Plus className="mr-2 h-4 w-4" />
             New Sale
           </Button>
+        </div>
+
+        {/* Mobile Layout - Stacked filters */}
+        <div className="flex flex-col gap-2 md:hidden">
+          {/* Date filter row */}
+          <div className="w-full">
+            <SimpleDateRangeFilter onDateRangeChange={(from, to) => setDateRange({ from, to })} defaultPreset="all" />
+          </div>
+          
+          {/* Status filter and New Sale button row */}
+          <div className="flex gap-2">
+            <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
+              <SelectTrigger className="flex-1">
+                <Filter className="mr-2 h-4 w-4" />
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Orders</SelectItem>
+                <SelectItem value="paid">Paid Orders</SelectItem>
+                <SelectItem value="pending">Pending Orders</SelectItem>
+                <SelectItem value="cancelled">Cancelled Orders</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={() => setShowSaleDialog(true)} className="w-fit">
+              <Plus className="mr-2 h-4 w-4" />
+              New Sale
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -494,7 +642,7 @@ export default function Sales() {
               <CardContent>
                 <div className="text-2xl font-bold">{formatCurrencyAmount(stats.totalRevenue)}</div>
                 <p className="text-xs text-muted-foreground">
-                  From {stats.totalSales} sales
+                  From {stats.totalRevenueCount} sales
                 </p>
               </CardContent>
             </Card>
@@ -506,7 +654,7 @@ export default function Sales() {
               <CardContent>
                 <div className="text-2xl font-bold">{formatCurrencyAmount(stats.totalPaid)}</div>
                 <p className="text-xs text-muted-foreground">
-                  Received payments
+                  From {stats.amountPaidCount} sales
                 </p>
               </CardContent>
             </Card>
@@ -518,7 +666,7 @@ export default function Sales() {
               <CardContent>
                 <div className="text-2xl font-bold">{formatCurrencyAmount(stats.totalDue)}</div>
                 <p className="text-xs text-muted-foreground">
-                  Outstanding payments
+                  From {stats.amountDueCount} sales
                 </p>
               </CardContent>
             </Card>
@@ -538,16 +686,17 @@ export default function Sales() {
               ))}
             </div>
           ) : (
-            <Table>
+            <div className="overflow-x-auto">
+              <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Invoice</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead className="flex items-center gap-2">
+                  <TableHead className="whitespace-nowrap">Invoice</TableHead>
+                  <TableHead className="whitespace-nowrap">Customer</TableHead>
+                  <TableHead className="whitespace-nowrap">Date</TableHead>
+                  <TableHead className="whitespace-nowrap">Amount</TableHead>
+                  <TableHead className="whitespace-nowrap">
                     <div className="flex items-center gap-2">
-                      Courier Status
+                      <span>Courier Status</span>
                       <div className="flex items-center gap-1">
                         <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Real-time updates active"></div>
                         <Button
@@ -563,32 +712,36 @@ export default function Sales() {
                       </div>
                     </div>
                   </TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="whitespace-nowrap">Order Status</TableHead>
+                  <TableHead className="whitespace-nowrap">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredSales.length === 0 ? (
+                {paginatedSales.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center text-muted-foreground">
                       No sales found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredSales.map((sale) => (
+                  paginatedSales.map((sale) => (
                     <TableRow key={sale.id}>
-                      <TableCell className="font-medium">{sale.invoice_number}</TableCell>
-                      <TableCell>{sale.customer_name}</TableCell>
-                      <TableCell>{format(new Date(sale.created_at), "MMM dd, yyyy")}</TableCell>
-                      <TableCell>{formatCurrencyAmount(sale.grand_total || 0)}</TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <Badge variant={
-                            sale.courier_status === 'delivered' ? 'default' : 
-                            sale.courier_status === 'in_transit' || sale.courier_status === 'out_for_delivery' ? 'secondary' : 
-                            sale.courier_status === 'not_sent' ? 'outline' :
-                            sale.courier_status === 'returned' || sale.courier_status === 'lost' ? 'destructive' :
-                            'secondary'
-                          }>
+                      <TableCell className="font-medium whitespace-nowrap">{sale.invoice_number}</TableCell>
+                      <TableCell className="whitespace-nowrap">{sale.customer_name}</TableCell>
+                      <TableCell className="whitespace-nowrap">{format(new Date(sale.created_at), "MMM dd, yyyy")}</TableCell>
+                      <TableCell className="whitespace-nowrap">{formatCurrencyAmount(sale.grand_total || 0)}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <div className="flex flex-col gap-1">
+                          <Badge 
+                            variant={
+                              sale.courier_status === 'delivered' ? 'default' : 
+                              sale.courier_status === 'in_transit' || sale.courier_status === 'out_for_delivery' ? 'secondary' : 
+                              sale.courier_status === 'not_sent' ? 'outline' :
+                              sale.courier_status === 'returned' || sale.courier_status === 'lost' ? 'destructive' :
+                              'secondary'
+                            }
+                            className="w-fit px-2 py-1"
+                          >
                             {sale.courier_status === 'not_sent' ? 'Not Sent' : 
                              sale.courier_status === 'in_transit' ? 'In Transit' :
                              sale.courier_status === 'out_for_delivery' ? 'Out for Delivery' :
@@ -597,19 +750,34 @@ export default function Sales() {
                              sale.courier_status?.replace('_', ' ').toUpperCase() || 'PENDING'}
                           </Badge>
                           {sale.last_status_check && (
-                            <div className="text-xs text-muted-foreground">
-                              Last updated: {format(new Date(sale.last_status_check), "MMM dd, HH:mm")}
+                            <div className="text-xs text-muted-foreground truncate">
+                              Updated: {format(new Date(sale.last_status_check), "MMM dd, HH:mm")}
                             </div>
                           )}
                           {sale.estimated_delivery && sale.courier_status !== 'delivered' && (
-                            <div className="text-xs text-muted-foreground">
+                            <div className="text-xs text-muted-foreground truncate">
                               ETA: {format(new Date(sale.estimated_delivery), "MMM dd")}
                             </div>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
+                      <TableCell className="whitespace-nowrap">
+                        <Badge 
+                          variant={
+                            sale.order_status === 'paid' ? 'default' : 
+                            sale.order_status === 'cancelled' ? 'destructive' : 
+                            'secondary'
+                          }
+                          className="w-fit px-2 py-1"
+                        >
+                          {sale.order_status === 'paid' ? 'Paid' : 
+                           sale.order_status === 'cancelled' ? 'Cancelled' :
+                           sale.order_status === 'pending' ? 'Pending' :
+                           sale.order_status || 'Pending'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <div className="flex items-center gap-1">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -663,9 +831,109 @@ export default function Sales() {
                 )}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Pagination Info and Controls */}
+      {totalSales > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-sm text-muted-foreground">
+            Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, totalSales)} of {totalSales} sales
+          </div>
+          
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center">
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious 
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+              
+              {(() => {
+                const maxVisiblePages = 5;
+                let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+                let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+                
+                if (endPage - startPage + 1 < maxVisiblePages) {
+                  startPage = Math.max(1, endPage - maxVisiblePages + 1);
+                }
+                
+                const pages = [];
+                
+                if (startPage > 1) {
+                  pages.push(
+                    <PaginationItem key={1}>
+                      <PaginationLink
+                        onClick={() => setCurrentPage(1)}
+                        className="cursor-pointer"
+                      >
+                        1
+                      </PaginationLink>
+                    </PaginationItem>
+                  );
+                  if (startPage > 2) {
+                    pages.push(
+                      <PaginationItem key="start-ellipsis">
+                        <span className="px-3 py-2 text-muted-foreground">...</span>
+                      </PaginationItem>
+                    );
+                  }
+                }
+                
+                for (let page = startPage; page <= endPage; page++) {
+                  pages.push(
+                    <PaginationItem key={page}>
+                      <PaginationLink
+                        onClick={() => setCurrentPage(page)}
+                        isActive={currentPage === page}
+                        className="cursor-pointer"
+                      >
+                        {page}
+                      </PaginationLink>
+                    </PaginationItem>
+                  );
+                }
+                
+                if (endPage < totalPages) {
+                  if (endPage < totalPages - 1) {
+                    pages.push(
+                      <PaginationItem key="end-ellipsis">
+                        <span className="px-3 py-2 text-muted-foreground">...</span>
+                      </PaginationItem>
+                    );
+                  }
+                  pages.push(
+                    <PaginationItem key={totalPages}>
+                      <PaginationLink
+                        onClick={() => setCurrentPage(totalPages)}
+                        className="cursor-pointer"
+                      >
+                        {totalPages}
+                      </PaginationLink>
+                    </PaginationItem>
+                  );
+                }
+                
+                return pages;
+              })()}
+              
+              <PaginationItem>
+                <PaginationNext 
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+            </div>
+          )}
+        </div>
+      )}
 
       <SaleDialog open={showSaleDialog} onOpenChange={setShowSaleDialog} />
       <EditSaleDialog 

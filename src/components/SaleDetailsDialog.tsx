@@ -10,6 +10,7 @@ import { useCurrency } from "@/hooks/useCurrency";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { getCategorizedOrderStatus } from "@/lib/orderStatusCategorization";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CourierStatusDetails } from "./CourierStatusDetails";
@@ -140,7 +141,7 @@ interface SaleWithItems {
   amount_paid: number;
   amount_due: number;
   payment_method: string;
-  payment_status: string;
+  order_status: string;
   order_status?: string;
   courier_status?: string;
   consignment_id?: string;
@@ -265,28 +266,29 @@ export const SaleDetailsDialog = ({ open, onOpenChange, saleId }: SaleDetailsDia
         console.log('Normalized display status:', displayStatus);
         
         // Map courier status to payment status for business logic
-        let paymentStatusUpdate = {};
+        let orderStatusUpdate = {};
         if (normalizedStatus.includes('delivered') || normalizedStatus.includes('completed')) {
-          paymentStatusUpdate = { payment_status: 'paid' };
-          console.log('SaleDetails: Setting payment status to: paid');
+          orderStatusUpdate = { order_status: 'paid' };
+          console.log('SaleDetails: Setting order status to: paid');
         } else if (normalizedStatus.includes('returned') || normalizedStatus.includes('cancelled') || 
                    normalizedStatus.includes('pickup_cancelled') || normalizedStatus.includes('pickup_cancel') || normalizedStatus.includes('lost')) {
-          paymentStatusUpdate = { payment_status: 'cancelled' };
-          console.log('SaleDetails: Setting payment status to: cancelled');
+          orderStatusUpdate = { order_status: 'cancelled' };
+          console.log('SaleDetails: Setting order status to: cancelled');
         } else {
           console.log('SaleDetails: No payment status update needed for status:', normalizedStatus);
         }
         
-        console.log('SaleDetails: Payment status update object:', paymentStatusUpdate);
+        console.log('SaleDetails: Order status update object:', orderStatusUpdate);
+        
         
         // Update the sale in database and local state
         const { error: updateError } = await supabase
           .from('sales')
           .update({ 
             courier_status: displayStatus,
-            order_status: displayStatus,
+            order_status: getCategorizedOrderStatus(displayStatus),
             last_status_check: new Date().toISOString(),
-            ...paymentStatusUpdate
+            ...orderStatusUpdate
           })
           .eq('id', saleId);
 
@@ -300,9 +302,9 @@ export const SaleDetailsDialog = ({ open, onOpenChange, saleId }: SaleDetailsDia
           setSale({
             ...sale,
             courier_status: displayStatus,
-            order_status: displayStatus,
+            order_status: getCategorizedOrderStatus(displayStatus),
             last_status_check: new Date().toISOString(),
-            ...paymentStatusUpdate
+            ...orderStatusUpdate
           });
           toast.success(`Status updated to: ${displayStatus}`);
         } else if (updateError) {
@@ -354,11 +356,11 @@ export const SaleDetailsDialog = ({ open, onOpenChange, saleId }: SaleDetailsDia
           <DialogTitle className="flex items-center justify-between">
             Sale Details - {sale.invoice_number}
             <Badge variant={
-              sale.payment_status === "paid" ? "default" : 
-              sale.payment_status === "cancelled" ? "destructive" : 
+              sale.order_status === "paid" ? "default" : 
+              sale.order_status === "cancelled" ? "destructive" : 
               "secondary"
             }>
-              {sale.payment_status.charAt(0).toUpperCase() + sale.payment_status.slice(1)}
+              {sale.order_status?.charAt(0).toUpperCase() + sale.order_status?.slice(1)}
             </Badge>
           </DialogTitle>
         </DialogHeader>

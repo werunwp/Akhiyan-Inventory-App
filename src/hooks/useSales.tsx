@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 import { useUserRole } from "./useUserRole";
 import { toast } from "sonner";
+import { getCategorizedOrderStatus } from "@/lib/orderStatusCategorization";
 
 export interface Sale {
   id: string;
@@ -22,8 +23,7 @@ export interface Sale {
   amount_paid: number;
   amount_due: number;
   payment_method: string;
-  payment_status: string;
-  order_status?: string;
+  order_status: string;
   courier_status?: string;
   consignment_id?: string;
   last_status_check?: string;
@@ -62,7 +62,7 @@ export interface CreateSaleData {
   amount_paid?: number;
   amount_due?: number;
   payment_method: string;
-  payment_status?: string;
+  order_status?: string;
   items: {
     product_id: string;
     product_name: string;
@@ -91,7 +91,6 @@ export interface UpdateSaleData {
   amount_paid?: number;
   amount_due?: number;
   payment_method: string;
-  payment_status?: string;
   items: {
     id?: string;
     product_id: string;
@@ -117,9 +116,9 @@ export const useSales = () => {
       // Since we're using hard delete, just fetch all sales for this customer
       const { data: sales, error } = await supabase
         .from('sales')
-        .select('created_at, payment_status, courier_status')
+        .select('created_at, order_status, courier_status')
         .eq('customer_id', customerId)
-        .not('payment_status', 'eq', 'cancelled')
+        .not('order_status', 'eq', 'cancelled')
         .not('courier_status', 'in', '(cancelled,returned,lost)')
         .order('created_at', { ascending: false });
 
@@ -229,6 +228,7 @@ export const useSales = () => {
           ...saleInfo,
           customer_id: finalCustomerId,
           invoice_number: invoiceData,
+          order_status: getCategorizedOrderStatus(saleInfo.courier_status || ''),
           created_by: user?.id
         }])
         .select()
@@ -342,16 +342,19 @@ export const useSales = () => {
       // Fetch previous sale status and invoice number before updating
       const { data: prevSale, error: prevSaleError } = await supabase
         .from("sales")
-        .select("payment_status, invoice_number")
+        .select("order_status, invoice_number, courier_status")
         .eq("id", id)
         .single();
       if (prevSaleError) throw prevSaleError;
-      const prevStatus = prevSale?.payment_status as string | undefined;
+      const prevStatus = prevSale?.order_status as string | undefined;
 
-      // Update sale record
+      // Update sale record with order status based on courier status
       const { data: sale, error: saleError } = await supabase
         .from("sales")
-        .update(saleInfo)
+        .update({
+          ...saleInfo,
+          order_status: getCategorizedOrderStatus(saleInfo.courier_status || prevSale?.courier_status || '')
+        })
         .eq("id", id)
         .select()
         .single();
@@ -427,7 +430,7 @@ export const useSales = () => {
       }
 
       // If new status is not cancelled, deduct stock for new items
-      const newStatus = (saleInfo.payment_status ?? sale.payment_status) as string | undefined;
+      const newStatus = (saleInfo.order_status ?? sale.order_status) as string | undefined;
       if (newStatus !== "cancelled") {
         for (const item of items) {
           if (item.variant_id) {

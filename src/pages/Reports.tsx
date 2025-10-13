@@ -68,22 +68,22 @@ const Reports = () => {
       // Calculate metrics for this day - only include revenue from successful orders
       const successfulSales = daySales.filter(sale => {
         const courierStatus = (sale.courier_status || '').toLowerCase();
-        const paymentStatus = (sale.payment_status || '').toLowerCase();
+        const orderStatus = (sale.order_status || '').toLowerCase();
         
         // Exclude cancelled and returned orders
         if (courierStatus.includes('cancel') || courierStatus.includes('return') || 
-            courierStatus.includes('lost') || paymentStatus === 'cancelled') {
+            courierStatus.includes('lost') || orderStatus === 'cancelled') {
           return false;
         }
         
         // Include successful deliveries and paid/pending/partial orders
         return courierStatus.includes('delivered') || courierStatus.includes('completed') ||
-               paymentStatus === 'paid' || paymentStatus === 'pending' || paymentStatus === 'partial';
+               orderStatus === 'paid' || orderStatus === 'pending' || orderStatus === 'partial';
       });
 
       const dailyRevenue = successfulSales.reduce((sum, sale) => {
         // For partial payments, use amount_paid instead of grand_total
-        if (sale.payment_status?.toLowerCase() === 'partial') {
+        if (sale.order_status?.toLowerCase() === 'partial') {
           return sum + (sale.amount_paid || 0);
         }
         return sum + (sale.grand_total || 0);
@@ -147,7 +147,7 @@ const Reports = () => {
         'Customer Phone': sale.customer_phone || '',
         'Grand Total': sale.grand_total,
         'Payment Method': sale.payment_method,
-        'Payment Status': sale.payment_status,
+        'Order Status': sale.order_status,
         'Discount Amount': sale.discount_amount || 0,
         'Amount Paid': sale.amount_paid || 0,
         'Amount Due': sale.amount_due || 0,
@@ -248,35 +248,44 @@ const Reports = () => {
       });
     }
 
-    // Filter for successful sales only (for revenue calculation)
-    const successfulSales = filteredSales.filter(sale => {
+    // Helper function to determine if a sale should be counted as successful/paid
+    const isSuccessfulSale = (sale: any) => {
       const courierStatus = (sale.courier_status || '').toLowerCase();
-      const paymentStatus = (sale.payment_status || '').toLowerCase();
+      const orderStatus = (sale.order_status || '').toLowerCase();
       
-      // Exclude cancelled and returned orders
-      if (courierStatus.includes('cancel') || courierStatus.includes('return') || 
-          courierStatus.includes('lost') || paymentStatus === 'cancelled') {
-        return false;
+      // DELIVERED, PARTIAL DELIVERY, and EXCHANGE count as successful
+      if (courierStatus.includes('delivered') || courierStatus.includes('partial delivery') || courierStatus.includes('exchange')) {
+        return true;
       }
       
-      // Include successful deliveries and paid/pending/partial orders
-      return courierStatus.includes('delivered') || courierStatus.includes('completed') ||
-             paymentStatus === 'paid' || paymentStatus === 'pending' || paymentStatus === 'partial';
-    });
+      // Traditional order status checks
+      return orderStatus === 'paid' || orderStatus === 'pending' || orderStatus === 'partial';
+    };
+    
+    // Helper function to determine if a sale should be counted as cancelled
+    const isCancelledSale = (sale: any) => {
+      const courierStatus = (sale.courier_status || '').toLowerCase();
+      const orderStatus = (sale.order_status || '').toLowerCase();
+      
+      // RETURN and PAID RETURN count as cancelled
+      if (courierStatus.includes('return') || courierStatus.includes('paid return')) {
+        return true;
+      }
+      
+      // Traditional cancellation checks
+      return orderStatus === 'cancelled' || courierStatus.includes('cancel') || courierStatus.includes('lost');
+    };
+
+    // Filter for successful sales only (for revenue calculation)
+    const successfulSales = filteredSales.filter(sale => isSuccessfulSale(sale));
 
     // Filter for cancelled/returned orders
-    const cancelledOrders = filteredSales.filter(sale => {
-      const courierStatus = (sale.courier_status || '').toLowerCase();
-      const paymentStatus = (sale.payment_status || '').toLowerCase();
-      
-      return courierStatus.includes('cancel') || courierStatus.includes('return') || 
-             courierStatus.includes('lost') || paymentStatus === 'cancelled';
-    });
+    const cancelledOrders = filteredSales.filter(sale => isCancelledSale(sale));
 
     // Calculate total revenue from successful sales
     const totalRevenue = successfulSales.reduce((sum, sale) => {
       // For partial payments, use amount_paid instead of grand_total
-      if (sale.payment_status?.toLowerCase() === 'partial') {
+      if (sale.order_status?.toLowerCase() === 'partial') {
         return sum + (sale.amount_paid || 0);
       }
       return sum + (sale.grand_total || 0);

@@ -26,7 +26,7 @@ export const SaleDialog = ({ open, onOpenChange }: SaleDialogProps) => {
         zone: data.zone || null,
         area: data.area || null,
         payment_method: data.paymentMethod,
-        payment_status: data.paymentStatus,
+        order_status: data.orderStatus,
         amount_paid: data.amountPaid,
         discount_percent: data.discountPercent,
         discount_amount: calculatedValues.discountAmount,

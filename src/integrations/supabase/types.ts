@@ -544,7 +544,6 @@ export type Database = {
           last_status_check: string | null
           order_status: string | null
           payment_method: string
-          payment_status: string | null
           subtotal: number
           updated_at: string | null
           zone: string | null
@@ -571,7 +570,6 @@ export type Database = {
           last_status_check?: string | null
           order_status?: string | null
           payment_method: string
-          payment_status?: string | null
           subtotal: number
           updated_at?: string | null
           zone?: string | null
@@ -598,7 +596,6 @@ export type Database = {
           last_status_check?: string | null
           order_status?: string | null
           payment_method?: string
-          payment_status?: string | null
           subtotal?: number
           updated_at?: string | null
           zone?: string | null

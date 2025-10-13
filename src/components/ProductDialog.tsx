@@ -236,7 +236,7 @@ export const ProductDialog = ({ open, onOpenChange, product }: ProductDialogProp
               return {
                 product_id: productId,
                 attributes: attrs,
-                sku: v.sku || null,
+                sku: v.sku?.trim() || null,
                 rate: v.rate ?? null,
                 cost: v.cost ?? null,
                 stock_quantity: v.quantity || 0,
@@ -250,12 +250,24 @@ export const ProductDialog = ({ open, onOpenChange, product }: ProductDialogProp
       } else {
         // No variants path
         if (isEditing && product) {
-          await updateProduct.mutateAsync({ id: product.id, data: { ...formData, has_variants: false } });
+          // Convert empty SKU to null
+          const processedFormData = {
+            ...formData,
+            sku: formData.sku?.trim() || null,
+            has_variants: false
+          };
+          await updateProduct.mutateAsync({ id: product.id, data: processedFormData });
           if (product.has_variants) {
             await clearVariants.mutateAsync(product.id);
           }
         } else {
-          await createProduct.mutateAsync({ ...formData, has_variants: false });
+          // Convert empty SKU to null
+          const processedFormData = {
+            ...formData,
+            sku: formData.sku?.trim() || null,
+            has_variants: false
+          };
+          await createProduct.mutateAsync(processedFormData);
         }
       }
     } catch (error) {
@@ -294,13 +306,16 @@ export const ProductDialog = ({ open, onOpenChange, product }: ProductDialogProp
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="sku">SKU</Label>
+            <Label htmlFor="sku">SKU (Optional)</Label>
             <Input
               id="sku"
               value={formData.sku}
               onChange={(e) => handleChange("sku", e.target.value)}
-              placeholder="Enter SKU"
+              placeholder="Enter SKU (leave empty if not needed)"
             />
+            <p className="text-xs text-muted-foreground">
+              SKU is optional. Leave empty if you don't need to track this product with a specific code.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

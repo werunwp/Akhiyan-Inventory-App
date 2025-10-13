@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { getCategorizedOrderStatus } from '@/lib/orderStatusCategorization';
 
 // Function to restore inventory when an order is cancelled
 const restoreInventoryForCancelledOrder = async (saleId: string) => {
@@ -223,12 +224,13 @@ export const useStatusAutoRefresh = () => {
               
               console.log('Auto-refresh: Payment status update object:', paymentStatusUpdate);
               
+
               // Update the sale in database
               await supabase
                 .from('sales')
                 .update({ 
                   courier_status: displayStatus,
-                  order_status: displayStatus,
+                  order_status: getCategorizedOrderStatus(displayStatus),
                   last_status_check: new Date().toISOString(),
                   ...paymentStatusUpdate
                 })

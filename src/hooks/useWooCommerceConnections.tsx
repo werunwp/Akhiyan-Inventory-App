@@ -551,7 +551,7 @@ export const useWooCommerceConnections = () => {
             .from("products")
             .update({
               name: product.name,
-              sku: product.sku || null,
+              sku: product.sku?.trim() || null,
               rate: parseFloat(product.price) || 0,
               cost: parseFloat(product.regular_price) || 0,
               stock_quantity: product.stock_quantity || 0,
@@ -575,7 +575,7 @@ export const useWooCommerceConnections = () => {
             .from("products")
             .insert({
               name: product.name,
-              sku: product.sku || null,
+              sku: product.sku?.trim() || null,
               rate: parseFloat(product.price) || 0,
               cost: parseFloat(product.regular_price) || 0,
               stock_quantity: product.stock_quantity || 0,

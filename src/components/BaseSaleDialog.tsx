@@ -46,8 +46,8 @@ export interface SaleFormData {
   area?: string;
   paymentMethod: string;
   payment_method?: string;
-  paymentStatus: string;
-  payment_status?: string;
+  orderStatus: string;
+  order_status?: string;
   amountPaid: number;
   amount_paid?: number;
   discountPercent: number;
@@ -99,7 +99,7 @@ export const BaseSaleDialog = ({
     zone: "",
     area: "",
     paymentMethod: "cash",
-    paymentStatus: "pending",
+    orderStatus: "pending",
     amountPaid: 0,
     discountPercent: 0,
     discountAmount: 0,
@@ -128,7 +128,7 @@ export const BaseSaleDialog = ({
         zone: "",
         area: "",
         paymentMethod: "cash",
-        paymentStatus: "pending",
+        orderStatus: "pending",
         amountPaid: 0,
         discountPercent: 0,
         discountAmount: 0,
@@ -153,7 +153,7 @@ export const BaseSaleDialog = ({
         zone: initialData.zone || "",
         area: initialData.area || "",
         paymentMethod: initialData.paymentMethod || initialData.payment_method || "cash",
-        paymentStatus: initialData.paymentStatus || initialData.payment_status || "pending",
+        orderStatus: initialData.orderStatus || initialData.order_status || "pending",
         amountPaid: initialData.amountPaid || initialData.amount_paid || 0,
         discountPercent: initialData.discountPercent || initialData.discount_percent || 0,
         discountAmount: initialData.discountAmount || initialData.discount_amount || 0,
@@ -260,15 +260,16 @@ export const BaseSaleDialog = ({
 
   // Auto-update payment status based on amount paid
   useEffect(() => {
-    if (formData.paymentStatus === "cancelled") return;
+    if (formData.orderStatus === "cancelled") return;
     if (formData.amountPaid === 0) {
-      setFormData(prev => ({ ...prev, paymentStatus: "pending" }));
+      setFormData(prev => ({ ...prev, orderStatus: "pending" }));
     } else if (formData.amountPaid >= grandTotal) {
-      setFormData(prev => ({ ...prev, paymentStatus: "paid" }));
+      setFormData(prev => ({ ...prev, orderStatus: "paid" }));
     } else {
-      setFormData(prev => ({ ...prev, paymentStatus: "partial" }));
+      setFormData(prev => ({ ...prev, orderStatus: "partial" }));
     }
-  }, [formData.amountPaid, grandTotal, formData.paymentStatus]);
+  }, [formData.amountPaid, grandTotal, formData.orderStatus]);
+
 
   const handleCustomerSelectFromName = (customer: any) => {
     setFormData(prev => ({
@@ -865,16 +866,16 @@ export const BaseSaleDialog = ({
 
                 <div className="space-y-2">
                   <Label>Order Status</Label>
-                  <Select value={formData.paymentStatus} onValueChange={(value) => {
+                  <Select value={formData.orderStatus} onValueChange={(value) => {
                     if (value === "paid") {
                       // When "Paid" is selected, automatically set amount paid to grand total
                       setFormData(prev => ({ 
                         ...prev, 
-                        paymentStatus: value,
+                        orderStatus: value,
                         amountPaid: grandTotal
                       }));
                     } else {
-                      setFormData(prev => ({ ...prev, paymentStatus: value }));
+                      setFormData(prev => ({ ...prev, orderStatus: value }));
                     }
                   }}>
                     <SelectTrigger>
@@ -887,7 +888,11 @@ export const BaseSaleDialog = ({
                       <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Order status is automatically updated based on courier status
+                  </p>
                 </div>
+
               </CardContent>
             </Card>
 

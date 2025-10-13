@@ -195,19 +195,19 @@ export const useCustomers = () => {
         // Get all sales for this customer
         const { data: allSales, error: salesError } = await supabase
           .from("sales")
-          .select("grand_total, created_at, payment_status, amount_paid")
+          .select("grand_total, created_at, order_status, amount_paid")
           .eq("customer_id", customer.id);
 
         if (salesError) throw salesError;
 
-        // Filter for paid sales (only payment_status = 'paid')
+        // Filter for paid sales (only order_status = 'paid')
         const paidSales = allSales?.filter(sale => 
-          sale.payment_status === 'paid'
+          sale.order_status === 'paid'
         ) || [];
 
         // Filter for cancelled orders
         const cancelledOrders = allSales?.filter(sale => 
-          sale.payment_status === 'cancelled'
+          sale.order_status === 'cancelled'
         ) || [];
 
         const orderCount = allSales?.length || 0; // Total orders count (all orders)

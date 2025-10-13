@@ -99,7 +99,7 @@ export const EditSaleDialog = ({ open, onOpenChange, saleId }: EditSaleDialogPro
           zone: saleWithItems.zone || "",
           area: saleWithItems.area || "",
           paymentMethod: saleWithItems.payment_method,
-          paymentStatus: saleWithItems.payment_status,
+          orderStatus: saleWithItems.order_status || "pending", // Use order_status field
           amountPaid: saleWithItems.amount_paid,
           discountPercent: saleWithItems.discount_percent,
           discountAmount: saleWithItems.discount_amount,
@@ -174,7 +174,7 @@ export const EditSaleDialog = ({ open, onOpenChange, saleId }: EditSaleDialogPro
         amount_paid: data.amountPaid,
         amount_due: calculatedValues.amountDue,
         payment_method: data.paymentMethod,
-        payment_status: data.paymentStatus,
+        order_status: data.orderStatus,
         fee: data.charge || 0,
         items: data.items.map(item => ({
           id: item.id,

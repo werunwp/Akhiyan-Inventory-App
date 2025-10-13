@@ -2,8 +2,8 @@
 // Update these values with your actual Supabase credentials
 
 window.APP_CONFIG = {
-  SUPABASE_URL: "YOUR_SUPABASE_URL_HERE", // Replace with your Supabase URL
-  SUPABASE_ANON_KEY: "YOUR_SUPABASE_ANON_KEY_HERE", // Replace with your actual key
+  SUPABASE_URL: "https://supabase.akhiyanbd.com", // Self-hosted Supabase instance
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0", // Default anon key for self-hosted
   APP_ENV: "production"
 };
 
