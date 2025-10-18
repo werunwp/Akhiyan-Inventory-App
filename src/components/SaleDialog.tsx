@@ -15,6 +15,12 @@ export const SaleDialog = ({ open, onOpenChange }: SaleDialogProps) => {
     grandTotal: number;
     amountDue: number;
   }) => {
+    // Prevent double submission
+    if (createSale.isPending) {
+      console.log("Sale creation already in progress, skipping duplicate submission");
+      return;
+    }
+
     try {
       await createSale.mutateAsync({
         customer_id: data.customerId || null,
@@ -57,6 +63,7 @@ export const SaleDialog = ({ open, onOpenChange }: SaleDialogProps) => {
       title="Create New Sale"
       isEditing={false}
       onSubmit={handleSubmit}
+      isLoading={createSale.isPending}
     />
   );
 };

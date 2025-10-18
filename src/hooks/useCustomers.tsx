@@ -181,6 +181,97 @@ export const useCustomers = () => {
   });
 
 
+  const updateCustomerAdditionalInfo = useMutation({
+    mutationFn: async (showNotification: boolean = true) => {
+      // Get all customers with empty additional_info
+      const { data: customersToUpdate, error: customersError } = await supabase
+        .from("customers")
+        .select("id, name")
+        .or("additional_info.is.null,additional_info.eq.");
+
+      if (customersError) throw customersError;
+
+      let updatedCount = 0;
+
+      // Process each customer
+      for (const customer of customersToUpdate || []) {
+        try {
+          // Get size values from this customer's purchase history
+          const { data: sizeData, error: sizeError } = await supabase
+            .from("sales")
+            .select(`
+              sales_items!inner(
+                variant_id,
+                product_variants!inner(
+                  attributes
+                )
+              )
+            `)
+            .eq("customer_id", customer.id);
+
+          if (sizeError) {
+            console.error(`Error getting size data for customer ${customer.name}:`, sizeError);
+            continue;
+          }
+
+          // Extract size values from variants
+          const sizeValues = new Set<string>();
+          
+          if (sizeData) {
+            for (const sale of sizeData) {
+              if (sale.sales_items && sale.sales_items.length > 0) {
+                for (const item of sale.sales_items) {
+                  if (item.product_variants?.attributes) {
+                    const attributes = item.product_variants.attributes as Record<string, string>;
+                    for (const [key, value] of Object.entries(attributes)) {
+                      if (key.toLowerCase().includes('size') && value && value.trim() !== '') {
+                        sizeValues.add(value.trim());
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Update customer if we found size values
+          if (sizeValues.size > 0) {
+            const additionalInfo = `Baby Age: ${Array.from(sizeValues).join(', ')}`;
+            
+            const { error: updateError } = await supabase
+              .from("customers")
+              .update({ 
+                additional_info: additionalInfo,
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", customer.id);
+
+            if (updateError) {
+              console.error(`Error updating customer ${customer.name}:`, updateError);
+            } else {
+              updatedCount++;
+              console.log(`Updated customer ${customer.name} with: ${additionalInfo}`);
+            }
+          }
+        } catch (error) {
+          console.error(`Error processing customer ${customer.name}:`, error);
+        }
+      }
+
+      return { updatedCount };
+    },
+    onSuccess: (data, showNotification) => {
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      if (showNotification) {
+        toast.success(`Updated additional info for ${data.updatedCount} customers`);
+      }
+    },
+    onError: (error) => {
+      console.error("Error updating customer additional info:", error);
+      toast.error("Failed to update customer additional info: " + error.message);
+    },
+  });
+
   const updateCustomerStats = useMutation({
     mutationFn: async (showNotification: boolean = true) => {
       // Get all customers and update their statistics with new columns
@@ -284,5 +375,7 @@ export const useCustomers = () => {
     deleteCustomer,
     updateCustomerStats: updateCustomerStats.mutate,
     isUpdatingStats: updateCustomerStats.isPending,
+    updateCustomerAdditionalInfo: updateCustomerAdditionalInfo.mutate,
+    isUpdatingAdditionalInfo: updateCustomerAdditionalInfo.isPending,
   };
 };

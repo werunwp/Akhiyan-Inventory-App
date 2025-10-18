@@ -208,21 +208,21 @@ export const useStatusAutoRefresh = () => {
               
               console.log('Normalized display status:', displayStatus);
               
-              // Map courier status to payment status
-              let paymentStatusUpdate = {};
+              // Map courier status to order status
+              let orderStatusUpdate = {};
               if (normalizedStatus.includes('delivered') || normalizedStatus.includes('completed')) {
-                paymentStatusUpdate = { payment_status: 'paid' };
-                console.log('Auto-refresh: Setting payment status to: paid');
+                orderStatusUpdate = { order_status: 'delivered' };
+                console.log('Auto-refresh: Setting order status to: delivered');
               } else if (normalizedStatus.includes('returned') || normalizedStatus.includes('lost') || 
                          normalizedStatus.includes('cancelled') || normalizedStatus.includes('pickup_cancelled') || 
                          normalizedStatus.includes('pickup_cancel')) {
-                paymentStatusUpdate = { payment_status: 'cancelled' };
-                console.log('Auto-refresh: Setting payment status to: cancelled');
+                orderStatusUpdate = { order_status: 'cancelled' };
+                console.log('Auto-refresh: Setting order status to: cancelled');
               } else {
-                console.log('Auto-refresh: No payment status update needed for status:', normalizedStatus);
+                console.log('Auto-refresh: No order status update needed for status:', normalizedStatus);
               }
               
-              console.log('Auto-refresh: Payment status update object:', paymentStatusUpdate);
+              console.log('Auto-refresh: Order status update object:', orderStatusUpdate);
               
 
               // Update the sale in database
@@ -232,7 +232,7 @@ export const useStatusAutoRefresh = () => {
                   courier_status: displayStatus,
                   order_status: getCategorizedOrderStatus(displayStatus),
                   last_status_check: new Date().toISOString(),
-                  ...paymentStatusUpdate
+                  ...orderStatusUpdate
                 })
                 .eq('id', sale.id);
 

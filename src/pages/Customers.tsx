@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import { useUserRole } from "@/hooks/useUserRole";
 
 const Customers = () => {
-  const { customers, isLoading, deleteCustomer, updateCustomer, createCustomer, updateCustomerStats, isUpdatingStats } = useCustomers();
+  const { customers, isLoading, deleteCustomer, updateCustomer, createCustomer, updateCustomerStats, isUpdatingStats, updateCustomerAdditionalInfo, isUpdatingAdditionalInfo } = useCustomers();
   const { formatAmount } = useCurrency();
   const { hasPermission, isAdmin } = useUserRole();
   const [searchTerm, setSearchTerm] = useState("");
@@ -406,6 +406,15 @@ const Customers = () => {
           >
             <RefreshCw className="mr-2 h-4 w-4" />
             {isUpdatingStats ? 'Refreshing...' : 'Refresh'}
+          </Button>
+          <Button 
+            onClick={() => updateCustomerAdditionalInfo(true)} 
+            disabled={isUpdatingAdditionalInfo}
+            variant="outline"
+            className="w-full sm:w-auto"
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            {isUpdatingAdditionalInfo ? 'Updating...' : 'Update Baby Ages'}
           </Button>
           {hasPermission('customers.add') && (
             <Button onClick={() => setIsDialogOpen(true)} className="w-full sm:w-auto">

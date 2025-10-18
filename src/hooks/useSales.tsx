@@ -185,6 +185,17 @@ export const useSales = () => {
       
       if (invoiceError) throw invoiceError;
 
+      // Check if a sale with this invoice number already exists (safeguard against duplicates)
+      const { data: existingSale } = await supabase
+        .from("sales")
+        .select("id")
+        .eq("invoice_number", invoiceData)
+        .maybeSingle();
+      
+      if (existingSale) {
+        throw new Error("A sale with this invoice number already exists. Please try again.");
+      }
+
       const { items, ...saleInfo } = saleData;
       
       // Check if customer exists or create new one if needed
@@ -202,6 +213,37 @@ export const useSales = () => {
         if (existingCustomer) {
           finalCustomerId = existingCustomer.id;
         } else {
+          // Extract size information from sales items for additional_info
+          let additionalInfo = '';
+          if (items && items.length > 0) {
+            const sizeValues = new Set<string>();
+            
+            // Get variant information for items with variants
+            for (const item of items) {
+              if (item.variant_id) {
+                const { data: variant } = await supabase
+                  .from("product_variants")
+                  .select("attributes")
+                  .eq("id", item.variant_id)
+                  .single();
+                
+                if (variant?.attributes) {
+                  const attributes = variant.attributes as Record<string, string>;
+                  // Look for size-related attributes (case insensitive)
+                  for (const [key, value] of Object.entries(attributes)) {
+                    if (key.toLowerCase().includes('size') && value) {
+                      sizeValues.add(value);
+                    }
+                  }
+                }
+              }
+            }
+            
+            if (sizeValues.size > 0) {
+              additionalInfo = `Baby Age: ${Array.from(sizeValues).join(', ')}`;
+            }
+          }
+          
           // Create new customer
           const { data: newCustomer, error: customerError } = await supabase
             .from("customers")
@@ -210,6 +252,7 @@ export const useSales = () => {
               phone: saleInfo.customer_phone || null,
               whatsapp: saleInfo.customer_whatsapp || null,
               address: saleInfo.customer_address || null,
+              additional_info: additionalInfo || null,
               status: 'active',
               created_by: user?.id
             }])

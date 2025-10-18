@@ -329,14 +329,12 @@ export default function Sales() {
       orderStatusUpdate = { order_status: categorizedOrderStatus };
       console.log(`Setting order status to: ${categorizedOrderStatus} based on courier status: ${displayStatus}`);
       
-      console.log('Payment status update object:', paymentStatusUpdate);
       console.log('Order status update object:', orderStatusUpdate);
         
       // Update the sale in database
       const updateData = {
         courier_status: displayStatus,
         last_status_check: new Date().toISOString(),
-        ...paymentStatusUpdate,
         ...orderStatusUpdate
       };
       
@@ -379,35 +377,72 @@ export default function Sales() {
   const handleBulkStatusRefresh = async () => {
     setIsRefreshingStatuses(true);
     
-    const salesWithConsignmentId = filteredSales.filter(sale => sale.consignment_id);
+    // Debug: Log current page info
+    console.log('Bulk refresh debug info:');
+    console.log('- Current page:', currentPage);
+    console.log('- Total pages:', totalPages);
+    console.log('- Items per page:', itemsPerPage);
+    console.log('- Total filtered sales:', filteredSales.length);
+    console.log('- Paginated sales count:', paginatedSales.length);
+    console.log('- Paginated sales:', paginatedSales.map(s => ({ id: s.id, invoice_number: s.invoice_number, consignment_id: s.consignment_id })));
+    
+    // Only process orders from the current page, not all orders
+    const salesWithConsignmentId = paginatedSales.filter(sale => sale.consignment_id);
+    
+    console.log('- Sales with consignment ID on current page:', salesWithConsignmentId.length);
+    console.log('- Sales with consignment ID:', salesWithConsignmentId.map(s => ({ id: s.id, invoice_number: s.invoice_number, consignment_id: s.consignment_id })));
     
     if (salesWithConsignmentId.length === 0) {
-      toast.info("No orders with tracking IDs found");
+      toast.info("No orders with tracking IDs found on current page");
       setIsRefreshingStatuses(false);
       return;
     }
 
     let successCount = 0;
     let failureCount = 0;
+    const batchSize = 2; // Process 2 requests at a time
 
-    for (const sale of salesWithConsignmentId) {
-      const success = await handleStatusRefresh(sale.id, sale.consignment_id!, false);
-      if (success) {
-        successCount++;
-      } else {
-        failureCount++;
+    console.log(`Bulk refresh: Processing ${salesWithConsignmentId.length} orders from current page (Page ${currentPage} of ${totalPages})`);
+
+    // Process sales in batches
+    for (let i = 0; i < salesWithConsignmentId.length; i += batchSize) {
+      const batch = salesWithConsignmentId.slice(i, i + batchSize);
+      
+      console.log(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(salesWithConsignmentId.length / batchSize)} (${batch.length} orders) from current page`);
+      console.log('Batch orders:', batch.map(s => ({ id: s.id, invoice_number: s.invoice_number, consignment_id: s.consignment_id })));
+      
+      // Process current batch SEQUENTIALLY (one at a time, max 2 requests per batch)
+      for (const sale of batch) {
+        console.log(`Starting refresh for sale ${sale.invoice_number} (ID: ${sale.id})`);
+        const success = await handleStatusRefresh(sale.id, sale.consignment_id!, false);
+        console.log(`Refresh result for sale ${sale.invoice_number}: ${success ? 'SUCCESS' : 'FAILED'}`);
+        
+        if (success) {
+          successCount++;
+        } else {
+          failureCount++;
+        }
+        
+        // Add small delay between individual requests within the batch
+        if (batch.indexOf(sale) < batch.length - 1) {
+          console.log(`Waiting 500ms before next request in batch...`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
       
-      // Add a small delay between requests to avoid overwhelming the webhook
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Add delay between batches
+      if (i + batchSize < salesWithConsignmentId.length) {
+        console.log(`Batch completed. Waiting 1 second before next batch...`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay between batches
+      }
     }
 
     setIsRefreshingStatuses(false);
     
     if (successCount > 0) {
-      toast.success(`Updated ${successCount} order statuses successfully${failureCount > 0 ? `, ${failureCount} failed` : ''}`);
+      toast.success(`Updated ${successCount} order statuses from current page${failureCount > 0 ? `, ${failureCount} failed` : ''}`);
     } else if (failureCount > 0) {
-      toast.error(`Failed to update ${failureCount} order statuses`);
+      toast.error(`Failed to update ${failureCount} order statuses from current page`);
     }
   };
 
