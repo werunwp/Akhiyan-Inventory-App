@@ -1,9 +1,12 @@
-import { Plus, Search, Filter, Edit, Trash2, Download, Upload, Copy, Image as ImageIcon } from "lucide-react";
+import { Plus, Search, Filter, Edit, Trash2, Download, Upload, Copy, Image as ImageIcon, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useProducts } from "@/hooks/useProducts";
 import { useProductVariants } from "@/hooks/useProductVariants";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
@@ -26,6 +29,22 @@ const Products = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [showProgressDialog, setShowProgressDialog] = useState(false);
+  const [optimizationProgress, setOptimizationProgress] = useState({
+    current: 0,
+    total: 0,
+    percentage: 0,
+    logs: [] as Array<{ message: string; type: 'success' | 'error' | 'info' | 'warning'; timestamp: string }>,
+    stats: {
+      compressed: 0,
+      skipped: 0,
+      errors: 0,
+      originalSize: 0,
+      compressedSize: 0
+    }
+  });
+  const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastProgressRef = useRef<number>(0);
   const itemsPerPage = 20;
 
   const filteredProducts = products.filter(product =>
@@ -61,6 +80,40 @@ const Products = () => {
     setEditingProduct(null);
   };
 
+  const addLog = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString();
+    setOptimizationProgress(prev => ({
+      ...prev,
+      logs: [...prev.logs, { message, type, timestamp }]
+    }));
+  };
+
+  const updateProgress = (current: number, total: number) => {
+    const percentage = Math.round((current / total) * 100);
+    setOptimizationProgress(prev => ({
+      ...prev,
+      current,
+      total,
+      percentage
+    }));
+    lastProgressRef.current = Date.now();
+  };
+
+  const resetStuckDetection = () => {
+    if (processingTimeoutRef.current) {
+      clearTimeout(processingTimeoutRef.current);
+    }
+    
+    // Set a timeout to detect stuck processing (30 seconds per image)
+    processingTimeoutRef.current = setTimeout(() => {
+      const timeSinceLastProgress = Date.now() - lastProgressRef.current;
+      if (timeSinceLastProgress > 30000 && isOptimizing) {
+        addLog('⚠️ Processing appears to be stuck. This might be due to a large image or network issues.', 'warning');
+        addLog('💡 Tip: Try refreshing the page if it stays stuck for more than a minute.', 'info');
+      }
+    }, 30000);
+  };
+
   const handleOptimizeImages = async () => {
     if (isOptimizing) {
       toast.info("Image optimization already in progress");
@@ -80,19 +133,26 @@ const Products = () => {
 
     if (!confirm) return;
 
-    setIsOptimizing(true);
-    
-    const stats = {
+    // Reset progress state
+    setOptimizationProgress({
+      current: 0,
       total: 0,
-      processed: 0,
-      compressed: 0,
-      skipped: 0,
-      errors: 0,
-      originalSize: 0,
-      compressedSize: 0
-    };
-
-    toast.info("🚀 Starting image optimization...");
+      percentage: 0,
+      logs: [],
+      stats: {
+        compressed: 0,
+        skipped: 0,
+        errors: 0,
+        originalSize: 0,
+        compressedSize: 0
+      }
+    });
+    
+    setIsOptimizing(true);
+    setShowProgressDialog(true);
+    lastProgressRef.current = Date.now();
+    
+    addLog('🚀 Starting image optimization...', 'info');
 
     try {
       // Get all unique image URLs from products
@@ -103,43 +163,63 @@ const Products = () => {
         }
       });
 
-      stats.total = imageUrls.size;
+      const total = imageUrls.size;
       
-      if (stats.total === 0) {
-        toast.info("No images found to optimize");
+      if (total === 0) {
+        addLog('⚠️ No images found to optimize', 'warning');
         setIsOptimizing(false);
+        setShowProgressDialog(false);
         return;
       }
 
-      toast.info(`Found ${stats.total} images to optimize`);
+      addLog(`📂 Found ${total} unique images to process`, 'info');
+      updateProgress(0, total);
 
       // Process each image
+      let processed = 0;
       for (const imageUrl of Array.from(imageUrls)) {
+        resetStuckDetection();
+        
         try {
           // Extract the file path from the URL
           const urlObj = new URL(imageUrl);
           const pathParts = urlObj.pathname.split('/');
           const fileName = pathParts[pathParts.length - 1];
 
-          console.log(`📥 Processing: ${fileName}`);
+          addLog(`📥 Processing: ${fileName}`, 'info');
 
           // Download the image
           const response = await fetch(imageUrl);
+          if (!response.ok) {
+            throw new Error(`Failed to download image: ${response.statusText}`);
+          }
+          
           const blob = await response.blob();
           const originalSize = blob.size;
-          stats.originalSize += originalSize;
 
           // Skip if already small enough
           if (originalSize <= 50 * 1024) {
-            console.log(`⏭️ Skipped ${fileName} (already ${(originalSize / 1024).toFixed(2)}KB)`);
-            stats.skipped++;
-            stats.compressedSize += originalSize;
-            stats.processed++;
+            const sizeKB = (originalSize / 1024).toFixed(2);
+            addLog(`⏭️ Skipped ${fileName} (already ${sizeKB}KB)`, 'info');
+            
+            setOptimizationProgress(prev => ({
+              ...prev,
+              stats: {
+                ...prev.stats,
+                skipped: prev.stats.skipped + 1,
+                originalSize: prev.stats.originalSize + originalSize,
+                compressedSize: prev.stats.compressedSize + originalSize
+              }
+            }));
+            
+            processed++;
+            updateProgress(processed, total);
             continue;
           }
 
           // Compress the image
-          console.log(`🗜️ Compressing ${fileName} (${(originalSize / 1024).toFixed(2)}KB)...`);
+          addLog(`🗜️ Compressing ${fileName} (${(originalSize / 1024).toFixed(2)}KB)...`, 'info');
+          
           const compressedBlob = await compressImage(
             new File([blob], fileName, { type: blob.type }),
             600,
@@ -149,7 +229,6 @@ const Products = () => {
           );
 
           const compressedSize = compressedBlob.size;
-          stats.compressedSize += compressedSize;
 
           // Upload the compressed image (replace existing)
           const { error: uploadError } = await supabase.storage
@@ -166,50 +245,80 @@ const Products = () => {
 
           const savedKB = ((originalSize - compressedSize) / 1024).toFixed(2);
           const savedPercent = ((1 - compressedSize / originalSize) * 100).toFixed(1);
-          console.log(
-            `✅ ${fileName}: ${(originalSize / 1024).toFixed(2)}KB → ` +
-            `${(compressedSize / 1024).toFixed(2)}KB (saved ${savedKB}KB, ${savedPercent}%)`
+          
+          addLog(
+            `✅ ${fileName}: ${(originalSize / 1024).toFixed(2)}KB → ${(compressedSize / 1024).toFixed(2)}KB (saved ${savedKB}KB, ${savedPercent}%)`,
+            'success'
           );
 
-          stats.compressed++;
-          stats.processed++;
+          setOptimizationProgress(prev => ({
+            ...prev,
+            stats: {
+              ...prev.stats,
+              compressed: prev.stats.compressed + 1,
+              originalSize: prev.stats.originalSize + originalSize,
+              compressedSize: prev.stats.compressedSize + compressedSize
+            }
+          }));
 
-          // Update progress
-          if (stats.processed % 5 === 0 || stats.processed === stats.total) {
-            toast.info(`Progress: ${stats.processed}/${stats.total} images processed`);
-          }
+          processed++;
+          updateProgress(processed, total);
 
           // Small delay to prevent overwhelming the server
           await new Promise(resolve => setTimeout(resolve, 200));
 
         } catch (error) {
-          console.error(`❌ Error processing image:`, error);
-          stats.errors++;
-          stats.processed++;
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          addLog(`❌ Error: ${errorMessage}`, 'error');
+          
+          setOptimizationProgress(prev => ({
+            ...prev,
+            stats: {
+              ...prev.stats,
+              errors: prev.stats.errors + 1
+            }
+          }));
+          
+          processed++;
+          updateProgress(processed, total);
         }
       }
 
+      // Clear timeout
+      if (processingTimeoutRef.current) {
+        clearTimeout(processingTimeoutRef.current);
+      }
+
       // Show summary
+      const { stats } = optimizationProgress;
       const totalSavedMB = ((stats.originalSize - stats.compressedSize) / (1024 * 1024)).toFixed(2);
       const percentSaved = stats.originalSize > 0 
         ? ((1 - stats.compressedSize / stats.originalSize) * 100).toFixed(1) 
         : 0;
 
-      let message = `🎉 Optimization Complete!\n\n`;
-      message += `📊 Summary:\n`;
-      message += `• Total images: ${stats.total}\n`;
-      message += `• Compressed: ${stats.compressed}\n`;
-      message += `• Skipped: ${stats.skipped}\n`;
-      message += `• Errors: ${stats.errors}\n`;
-      message += `• Space saved: ${totalSavedMB} MB (${percentSaved}%)\n`;
+      addLog('━'.repeat(50), 'info');
+      addLog('🎉 Optimization Complete!', 'success');
+      addLog(`📊 Total images: ${total}`, 'info');
+      addLog(`✅ Compressed: ${stats.compressed}`, 'success');
+      addLog(`⏭️ Skipped: ${stats.skipped}`, 'info');
+      if (stats.errors > 0) {
+        addLog(`❌ Errors: ${stats.errors}`, 'error');
+      }
+      addLog(`💾 Space saved: ${totalSavedMB} MB (${percentSaved}%)`, 'success');
+      addLog('━'.repeat(50), 'info');
 
-      toast.success(message, { duration: 10000 });
+      toast.success(`Optimization complete! Saved ${totalSavedMB} MB`, { duration: 5000 });
 
     } catch (error) {
-      console.error("Fatal error during optimization:", error);
-      toast.error(`Optimization failed: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      addLog(`❌ Fatal error: ${errorMessage}`, 'error');
+      addLog('💡 Please check your network connection and try again.', 'info');
+      toast.error(`Optimization failed: ${errorMessage}`);
     } finally {
       setIsOptimizing(false);
+      if (processingTimeoutRef.current) {
+        clearTimeout(processingTimeoutRef.current);
+      }
     }
   };
 
@@ -765,6 +874,140 @@ const Products = () => {
         onOpenChange={handleCloseDialog}
         product={editingProduct}
       />
+
+      {/* Progress Dialog */}
+      <Dialog open={showProgressDialog} onOpenChange={(open) => {
+        if (!isOptimizing) {
+          setShowProgressDialog(open);
+        }
+      }}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ImageIcon className="h-5 w-5" />
+              Image Optimization Progress
+            </DialogTitle>
+            <DialogDescription>
+              Compressing product images to under 50KB
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Progress Bar */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">
+                  Progress: {optimizationProgress.current} / {optimizationProgress.total}
+                </span>
+                <span className="font-medium">{optimizationProgress.percentage}%</span>
+              </div>
+              <Progress value={optimizationProgress.percentage} className="h-2" />
+            </div>
+
+            {/* Stats Cards */}
+            <div className="grid grid-cols-3 gap-2">
+              <Card>
+                <CardContent className="p-3 text-center">
+                  <div className="flex items-center justify-center gap-1 text-green-600">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span className="text-lg font-bold">{optimizationProgress.stats.compressed}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Compressed</p>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-3 text-center">
+                  <div className="flex items-center justify-center gap-1 text-blue-600">
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="text-lg font-bold">{optimizationProgress.stats.skipped}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Skipped</p>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-3 text-center">
+                  <div className="flex items-center justify-center gap-1 text-red-600">
+                    <XCircle className="h-4 w-4" />
+                    <span className="text-lg font-bold">{optimizationProgress.stats.errors}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Errors</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Space Saved */}
+            {optimizationProgress.stats.originalSize > 0 && (
+              <Card className="bg-primary/5">
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Space Saved:</span>
+                    <span className="text-lg font-bold text-primary">
+                      {((optimizationProgress.stats.originalSize - optimizationProgress.stats.compressedSize) / (1024 * 1024)).toFixed(2)} MB
+                      {optimizationProgress.stats.originalSize > 0 && (
+                        <span className="text-sm text-muted-foreground ml-2">
+                          ({((1 - optimizationProgress.stats.compressedSize / optimizationProgress.stats.originalSize) * 100).toFixed(1)}%)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Log Messages */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Activity Log</span>
+                <Badge variant="outline" className="text-xs">
+                  {optimizationProgress.logs.length} entries
+                </Badge>
+              </div>
+              
+              <ScrollArea className="h-[250px] w-full rounded-md border p-3">
+                <div className="space-y-1">
+                  {optimizationProgress.logs.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-8">
+                      No activity yet...
+                    </p>
+                  ) : (
+                    optimizationProgress.logs.map((log, index) => (
+                      <div
+                        key={index}
+                        className={`text-xs p-2 rounded flex items-start gap-2 ${
+                          log.type === 'success' ? 'bg-green-50 text-green-700' :
+                          log.type === 'error' ? 'bg-red-50 text-red-700' :
+                          log.type === 'warning' ? 'bg-yellow-50 text-yellow-700' :
+                          'bg-gray-50 text-gray-700'
+                        }`}
+                      >
+                        <span className="text-muted-foreground shrink-0 font-mono">
+                          {log.timestamp}
+                        </span>
+                        <span className="flex-1 break-words">{log.message}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-2">
+              {isOptimizing ? (
+                <Button disabled className="w-full">
+                  <span className="animate-pulse">Processing...</span>
+                </Button>
+              ) : (
+                <Button onClick={() => setShowProgressDialog(false)} className="w-full">
+                  Close
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
