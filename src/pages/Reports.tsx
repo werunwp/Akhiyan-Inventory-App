@@ -8,6 +8,7 @@ import { useDashboard } from "@/hooks/useDashboard";
 import { useProducts } from "@/hooks/useProducts";
 import { useCustomers } from "@/hooks/useCustomers";
 import { useSales } from "@/hooks/useSales";
+import { useSalesItems } from "@/hooks/useSalesItems";
 
 import { SimpleDateRangeFilter } from "@/components/SimpleDateRangeFilter";
 
@@ -25,8 +26,9 @@ const Reports = () => {
   const { products, isLoading: productsLoading } = useProducts();
   const { customers, isLoading: customersLoading } = useCustomers();
   const { sales, isLoading: salesLoading } = useSales();
+  const { salesItems, isLoading: salesItemsLoading } = useSalesItems(dateRange.from, dateRange.to);
 
-  const isAnyLoading = dashboardLoading || productsLoading || customersLoading || salesLoading;
+  const isAnyLoading = dashboardLoading || productsLoading || customersLoading || salesLoading || salesItemsLoading;
 
   // Generate histogram data based on date range
   const chartData = useMemo(() => {
@@ -303,6 +305,73 @@ const Reports = () => {
     ? filteredSalesData.totalRevenue / filteredSalesData.successfulOrders 
     : 0;
 
+  // Calculate top sold items based on date range
+  const topSoldItems = useMemo(() => {
+    if (!salesItems?.length || !products?.length || !sales?.length) return [];
+
+    // Get sale IDs from filtered sales (successful sales only)
+    const successfulSaleIds = sales
+      .filter(sale => {
+        // Apply date filter
+        const saleDate = new Date(sale.created_at);
+        const isInDateRange = (!dateRange.from || saleDate >= dateRange.from) && 
+                             (!dateRange.to || saleDate <= dateRange.to);
+        
+        if (!isInDateRange) return false;
+
+        // Filter for successful sales only
+        const courierStatus = (sale.courier_status || '').toLowerCase();
+        const orderStatus = (sale.order_status || '').toLowerCase();
+        
+        // Exclude cancelled and returned orders
+        if (courierStatus.includes('cancel') || courierStatus.includes('return') || 
+            courierStatus.includes('lost') || orderStatus === 'cancelled') {
+          return false;
+        }
+        
+        // Include successful deliveries and paid/pending/partial orders
+        return courierStatus.includes('delivered') || courierStatus.includes('completed') ||
+               orderStatus === 'paid' || orderStatus === 'pending' || orderStatus === 'partial';
+      })
+      .map(sale => sale.id);
+
+    // Group sales items by product_id and calculate totals
+    const productSalesMap = new Map<string, { quantity: number; revenue: number; productName: string }>();
+
+    salesItems
+      .filter(item => successfulSaleIds.includes(item.sale_id))
+      .forEach(item => {
+        const existing = productSalesMap.get(item.product_id) || { 
+          quantity: 0, 
+          revenue: 0, 
+          productName: item.product_name 
+        };
+        
+        productSalesMap.set(item.product_id, {
+          quantity: existing.quantity + item.quantity,
+          revenue: existing.revenue + item.total,
+          productName: item.product_name
+        });
+      });
+
+    // Convert to array and add product details
+    const itemsArray = Array.from(productSalesMap.entries())
+      .map(([productId, data]) => {
+        const product = products.find(p => p.id === productId);
+        return {
+          productId,
+          productName: data.productName,
+          quantity: data.quantity,
+          revenue: data.revenue,
+          image: product?.image_url || '/placeholder.svg'
+        };
+      })
+      .sort((a, b) => b.revenue - a.revenue) // Sort by revenue
+      .slice(0, 10); // Top 10 items
+
+    return itemsArray;
+  }, [salesItems, products, sales, dateRange]);
+
 
 
   return (
@@ -392,6 +461,71 @@ const Reports = () => {
           </>
         )}
       </div>
+
+      {/* Top Sold Items Section */}
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="text-xl">Top Sold Items</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Best selling products based on revenue for the selected period
+          </p>
+        </CardHeader>
+        <CardContent>
+          {isAnyLoading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {[...Array(10)].map((_, i) => (
+                <Card key={i} className="overflow-hidden">
+                  <Skeleton className="h-32 w-full" />
+                  <div className="p-3 space-y-2">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-3 w-2/3" />
+                    <Skeleton className="h-5 w-1/2" />
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : topSoldItems.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {topSoldItems.map((item, index) => (
+                <Card key={item.productId} className="overflow-hidden hover:shadow-lg transition-shadow">
+                  <div className="relative">
+                    <img 
+                      src={item.image} 
+                      alt={item.productName}
+                      className="w-full h-32 object-cover"
+                      onError={(e) => {
+                        e.currentTarget.src = '/placeholder.svg';
+                      }}
+                    />
+                    <div className="absolute top-2 left-2 bg-primary text-primary-foreground text-xs font-bold px-2 py-1 rounded">
+                      #{index + 1}
+                    </div>
+                  </div>
+                  <div className="p-3 space-y-1">
+                    <h3 className="font-semibold text-sm line-clamp-2 min-h-[2.5rem]" title={item.productName}>
+                      {item.productName}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Sold: {item.quantity} units
+                    </p>
+                    <p className="text-base font-bold text-primary">
+                      {formatAmount(item.revenue)}
+                    </p>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="h-[200px] flex items-center justify-center">
+              <div className="text-center space-y-2">
+                <Package className="h-12 w-12 text-muted-foreground mx-auto" />
+                <p className="text-muted-foreground">No sold items found for the selected period</p>
+                <p className="text-sm text-muted-foreground">Try adjusting the date range</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Comprehensive Business Overview Chart */}
       <Card className="w-full">

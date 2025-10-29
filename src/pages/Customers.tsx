@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { useCustomers } from "@/hooks/useCustomers";
 import { useState, useMemo, useRef, useEffect } from "react";
 import { CustomerDialog } from "@/components/CustomerDialog";
@@ -31,6 +32,8 @@ const Customers = () => {
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasRefreshedStats = useRef(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(20);
 
   // Automatically refresh customer stats when the page loads
   useEffect(() => {
@@ -59,6 +62,17 @@ const Customers = () => {
       return matchesSearch && matchesDate;
     });
   }, [customers, searchTerm, startDate, endDate]);
+
+  // Pagination calculations
+  const totalCustomers = filteredCustomers.length;
+  const totalPages = Math.ceil(totalCustomers / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedCustomers = filteredCustomers.slice(startIndex, startIndex + itemsPerPage);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, startDate, endDate]);
 
   const handleEdit = (customer) => {
     setEditingCustomer(customer);
@@ -564,8 +578,14 @@ const Customers = () => {
                     <TableCell><div className="h-4 bg-muted rounded animate-pulse" /></TableCell>
                   </TableRow>
                 ))
+              ) : paginatedCustomers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                    No customers found
+                  </TableCell>
+                </TableRow>
               ) : (
-                filteredCustomers.map((customer) => {
+                paginatedCustomers.map((customer) => {
                   return (
                     <TableRow key={customer.id}>
                       <TableCell className="font-medium">{customer.name}</TableCell>
@@ -637,6 +657,64 @@ const Customers = () => {
             </TableBody>
           </Table>
           </TooltipProvider>
+
+          {/* Pagination */}
+          {!isLoading && totalCustomers > 0 && (
+            <div className="flex items-center justify-between mt-4">
+              <div className="text-sm text-muted-foreground">
+                Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, totalCustomers)} of {totalCustomers} customers
+              </div>
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious 
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    />
+                  </PaginationItem>
+                  
+                  {[...Array(totalPages)].map((_, i) => {
+                    const pageNumber = i + 1;
+                    // Show first page, last page, current page, and pages around current
+                    const showPage = pageNumber === 1 || 
+                                   pageNumber === totalPages || 
+                                   (pageNumber >= currentPage - 1 && pageNumber <= currentPage + 1);
+                    
+                    if (!showPage) {
+                      // Show ellipsis
+                      if (pageNumber === currentPage - 2 || pageNumber === currentPage + 2) {
+                        return (
+                          <PaginationItem key={i}>
+                            <span className="px-4">...</span>
+                          </PaginationItem>
+                        );
+                      }
+                      return null;
+                    }
+                    
+                    return (
+                      <PaginationItem key={i}>
+                        <PaginationLink
+                          onClick={() => setCurrentPage(pageNumber)}
+                          isActive={currentPage === pageNumber}
+                          className="cursor-pointer"
+                        >
+                          {pageNumber}
+                        </PaginationLink>
+                      </PaginationItem>
+                    );
+                  })}
+                  
+                  <PaginationItem>
+                    <PaginationNext 
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
         </CardContent>
       </Card>
 
