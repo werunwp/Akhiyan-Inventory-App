@@ -45,6 +45,7 @@ const Products = () => {
   });
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProgressRef = useRef<number>(0);
+  const shouldStopRef = useRef<boolean>(false);
   const itemsPerPage = 20;
 
   const filteredProducts = products.filter(product =>
@@ -151,6 +152,7 @@ const Products = () => {
     setIsOptimizing(true);
     setShowProgressDialog(true);
     lastProgressRef.current = Date.now();
+    shouldStopRef.current = false;
     
     addLog('🚀 Starting image optimization...', 'info');
 
@@ -178,6 +180,12 @@ const Products = () => {
       // Process each image
       let processed = 0;
       for (const imageUrl of Array.from(imageUrls)) {
+        // Check if user requested stop
+        if (shouldStopRef.current) {
+          addLog('⏹️ Optimization stopped by user', 'warning');
+          break;
+        }
+        
         resetStuckDetection();
         
         try {
@@ -188,13 +196,20 @@ const Products = () => {
 
           addLog(`📥 Processing: ${fileName}`, 'info');
 
-          // Download the image
-          const response = await fetch(imageUrl);
-          if (!response.ok) {
-            throw new Error(`Failed to download image: ${response.statusText}`);
-          }
-          
-          const blob = await response.blob();
+          // Create a timeout promise (20 seconds per image)
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Processing timeout - image took too long')), 20000);
+          });
+
+          // Download the image with timeout
+          const downloadPromise = fetch(imageUrl).then(async response => {
+            if (!response.ok) {
+              throw new Error(`Failed to download image: ${response.statusText}`);
+            }
+            return response.blob();
+          });
+
+          const blob = await Promise.race([downloadPromise, timeoutPromise]) as Blob;
           const originalSize = blob.size;
 
           // Skip if already small enough
@@ -217,10 +232,10 @@ const Products = () => {
             continue;
           }
 
-          // Compress the image
+          // Compress the image with timeout
           addLog(`🗜️ Compressing ${fileName} (${(originalSize / 1024).toFixed(2)}KB)...`, 'info');
           
-          const compressedBlob = await compressImage(
+          const compressionPromise = compressImage(
             new File([blob], fileName, { type: blob.type }),
             600,
             600,
@@ -228,16 +243,19 @@ const Products = () => {
             50
           );
 
+          const compressedBlob = await Promise.race([compressionPromise, timeoutPromise]) as Blob;
           const compressedSize = compressedBlob.size;
 
-          // Upload the compressed image (replace existing)
-          const { error: uploadError } = await supabase.storage
+          // Upload the compressed image (replace existing) with timeout
+          const uploadPromise = supabase.storage
             .from('product-images')
             .upload(fileName, compressedBlob, {
               contentType: 'image/jpeg',
               cacheControl: '3600',
               upsert: true
             });
+
+          const { error: uploadError } = await Promise.race([uploadPromise, timeoutPromise]) as { error: any };
 
           if (uploadError) {
             throw uploadError;
@@ -996,9 +1014,21 @@ const Products = () => {
             {/* Action Buttons */}
             <div className="flex justify-end gap-2">
               {isOptimizing ? (
-                <Button disabled className="w-full">
-                  <span className="animate-pulse">Processing...</span>
-                </Button>
+                <>
+                  <Button 
+                    variant="destructive" 
+                    onClick={() => {
+                      shouldStopRef.current = true;
+                      addLog('⏹️ Stopping optimization...', 'warning');
+                    }}
+                    className="flex-1"
+                  >
+                    Stop Optimization
+                  </Button>
+                  <Button disabled className="flex-1">
+                    <span className="animate-pulse">Processing...</span>
+                  </Button>
+                </>
               ) : (
                 <Button onClick={() => setShowProgressDialog(false)} className="w-full">
                   Close
