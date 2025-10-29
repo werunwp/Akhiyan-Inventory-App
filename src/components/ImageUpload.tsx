@@ -30,8 +30,8 @@ export const ImageUpload = ({ value, onChange, onRemove, compact = false }: Imag
 
     setIsUploading(true);
     try {
-      // Compress the image before uploading (80px max size for fast loading)
-      const compressedBlob = await compressImage(file, 80, 80, 0.7);
+      // Compress the image before uploading (max 80KB file size)
+      const compressedBlob = await compressImage(file, 600, 600, 0.65, 80);
       
       // Create a new file from the compressed blob
       const compressedFile = new File(
@@ -222,7 +222,7 @@ export const ImageUpload = ({ value, onChange, onRemove, compact = false }: Imag
                 Drag and drop an image here, or click to select
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Max 10MB • Auto-optimized to 80px
+                Max 10MB • Auto-optimized to under 80KB
               </p>
             </>
           )}

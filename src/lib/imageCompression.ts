@@ -1,16 +1,18 @@
 /**
  * Compress and resize an image file
  * @param file - The image file to compress
- * @param maxWidth - Maximum width in pixels (default: 80)
- * @param maxHeight - Maximum height in pixels (default: 80)
- * @param quality - JPEG quality 0-1 (default: 0.7)
+ * @param maxWidth - Maximum width in pixels (default: 600)
+ * @param maxHeight - Maximum height in pixels (default: 600)
+ * @param quality - JPEG quality 0-1 (default: 0.65)
+ * @param maxFileSizeKB - Maximum file size in KB (default: 80)
  * @returns Compressed image as a Blob
  */
 export async function compressImage(
   file: File,
-  maxWidth: number = 80,
-  maxHeight: number = 80,
-  quality: number = 0.7
+  maxWidth: number = 600,
+  maxHeight: number = 600,
+  quality: number = 0.65,
+  maxFileSizeKB: number = 80
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -52,19 +54,39 @@ export async function compressImage(
         
         ctx.drawImage(img, 0, 0, width, height);
         
-        // Convert to blob
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              console.log(`Original size: ${(file.size / 1024).toFixed(2)}KB, Compressed size: ${(blob.size / 1024).toFixed(2)}KB`);
-              resolve(blob);
-            } else {
-              reject(new Error('Failed to compress image'));
-            }
-          },
-          'image/jpeg',
-          quality
-        );
+        // Function to compress with iterative quality reduction
+        const compressWithQuality = (currentQuality: number) => {
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                reject(new Error('Failed to compress image'));
+                return;
+              }
+              
+              const fileSizeKB = blob.size / 1024;
+              
+              // If file size is under maxFileSizeKB or quality is already very low, use this blob
+              if (fileSizeKB <= maxFileSizeKB || currentQuality <= 0.3) {
+                console.log(
+                  `Original size: ${(file.size / 1024).toFixed(2)}KB, ` +
+                  `Compressed size: ${fileSizeKB.toFixed(2)}KB, ` +
+                  `Quality: ${(currentQuality * 100).toFixed(0)}%`
+                );
+                resolve(blob);
+              } else {
+                // Reduce quality and try again
+                const newQuality = Math.max(0.3, currentQuality - 0.05);
+                console.log(`File size ${fileSizeKB.toFixed(2)}KB > ${maxFileSizeKB}KB, reducing quality to ${(newQuality * 100).toFixed(0)}%`);
+                compressWithQuality(newQuality);
+              }
+            },
+            'image/jpeg',
+            currentQuality
+          );
+        };
+        
+        // Start compression with initial quality
+        compressWithQuality(quality);
       };
       
       img.onerror = () => {
