@@ -3,16 +3,16 @@
  * @param file - The image file to compress
  * @param maxWidth - Maximum width in pixels (default: 600)
  * @param maxHeight - Maximum height in pixels (default: 600)
- * @param quality - JPEG quality 0-1 (default: 0.65)
- * @param maxFileSizeKB - Maximum file size in KB (default: 80)
+ * @param quality - JPEG quality 0-1 (default: 0.6)
+ * @param maxFileSizeKB - Maximum file size in KB (default: 50)
  * @returns Compressed image as a Blob
  */
 export async function compressImage(
   file: File,
   maxWidth: number = 600,
   maxHeight: number = 600,
-  quality: number = 0.65,
-  maxFileSizeKB: number = 80
+  quality: number = 0.6,
+  maxFileSizeKB: number = 50
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

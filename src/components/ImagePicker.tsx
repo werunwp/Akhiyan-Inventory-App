@@ -125,8 +125,8 @@ export const ImagePicker = ({
 
     setIsUploading(true);
     try {
-      // Compress the image before uploading (max 80KB file size)
-      const compressedBlob = await compressImage(file, 600, 600, 0.65, 80);
+      // Compress the image before uploading (max 50KB file size)
+      const compressedBlob = await compressImage(file, 600, 600, 0.6, 50);
       
       // Create a new file from the compressed blob
       const compressedFile = new File(
