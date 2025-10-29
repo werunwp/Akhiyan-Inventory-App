@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, Edit, Trash2, Download, Upload, Copy } from "lucide-react";
+import { Plus, Search, Filter, Edit, Trash2, Download, Upload, Copy, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,8 @@ import { ProductDialog } from "@/components/ProductDialog";
 import { ProductCard } from "@/components/ProductCard";
 import { useCurrency } from "@/hooks/useCurrency";
 import * as ExcelJS from "exceljs";
+import { compressImage } from "@/lib/imageCompression";
+import { supabase } from "@/integrations/supabase/client";
 
 const Products = () => {
   const { products, isLoading, deleteProduct, createProduct, updateProduct, duplicateProduct } = useProducts();
@@ -23,6 +25,7 @@ const Products = () => {
   const [editingProduct, setEditingProduct] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
   const itemsPerPage = 20;
 
   const filteredProducts = products.filter(product =>
@@ -56,6 +59,158 @@ const Products = () => {
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
     setEditingProduct(null);
+  };
+
+  const handleOptimizeImages = async () => {
+    if (isOptimizing) {
+      toast.info("Image optimization already in progress");
+      return;
+    }
+
+    if (!products || products.length === 0) {
+      toast.error("No products found to optimize");
+      return;
+    }
+
+    const confirm = window.confirm(
+      `This will compress all product images to under 50KB.\n\n` +
+      `Found ${products.length} products.\n\n` +
+      `This may take a few minutes. Continue?`
+    );
+
+    if (!confirm) return;
+
+    setIsOptimizing(true);
+    
+    const stats = {
+      total: 0,
+      processed: 0,
+      compressed: 0,
+      skipped: 0,
+      errors: 0,
+      originalSize: 0,
+      compressedSize: 0
+    };
+
+    toast.info("🚀 Starting image optimization...");
+
+    try {
+      // Get all unique image URLs from products
+      const imageUrls = new Set<string>();
+      products.forEach(product => {
+        if (product.image_url && product.image_url !== '/placeholder.svg') {
+          imageUrls.add(product.image_url);
+        }
+      });
+
+      stats.total = imageUrls.size;
+      
+      if (stats.total === 0) {
+        toast.info("No images found to optimize");
+        setIsOptimizing(false);
+        return;
+      }
+
+      toast.info(`Found ${stats.total} images to optimize`);
+
+      // Process each image
+      for (const imageUrl of Array.from(imageUrls)) {
+        try {
+          // Extract the file path from the URL
+          const urlObj = new URL(imageUrl);
+          const pathParts = urlObj.pathname.split('/');
+          const fileName = pathParts[pathParts.length - 1];
+
+          console.log(`📥 Processing: ${fileName}`);
+
+          // Download the image
+          const response = await fetch(imageUrl);
+          const blob = await response.blob();
+          const originalSize = blob.size;
+          stats.originalSize += originalSize;
+
+          // Skip if already small enough
+          if (originalSize <= 50 * 1024) {
+            console.log(`⏭️ Skipped ${fileName} (already ${(originalSize / 1024).toFixed(2)}KB)`);
+            stats.skipped++;
+            stats.compressedSize += originalSize;
+            stats.processed++;
+            continue;
+          }
+
+          // Compress the image
+          console.log(`🗜️ Compressing ${fileName} (${(originalSize / 1024).toFixed(2)}KB)...`);
+          const compressedBlob = await compressImage(
+            new File([blob], fileName, { type: blob.type }),
+            600,
+            600,
+            0.6,
+            50
+          );
+
+          const compressedSize = compressedBlob.size;
+          stats.compressedSize += compressedSize;
+
+          // Upload the compressed image (replace existing)
+          const { error: uploadError } = await supabase.storage
+            .from('product-images')
+            .upload(fileName, compressedBlob, {
+              contentType: 'image/jpeg',
+              cacheControl: '3600',
+              upsert: true
+            });
+
+          if (uploadError) {
+            throw uploadError;
+          }
+
+          const savedKB = ((originalSize - compressedSize) / 1024).toFixed(2);
+          const savedPercent = ((1 - compressedSize / originalSize) * 100).toFixed(1);
+          console.log(
+            `✅ ${fileName}: ${(originalSize / 1024).toFixed(2)}KB → ` +
+            `${(compressedSize / 1024).toFixed(2)}KB (saved ${savedKB}KB, ${savedPercent}%)`
+          );
+
+          stats.compressed++;
+          stats.processed++;
+
+          // Update progress
+          if (stats.processed % 5 === 0 || stats.processed === stats.total) {
+            toast.info(`Progress: ${stats.processed}/${stats.total} images processed`);
+          }
+
+          // Small delay to prevent overwhelming the server
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+        } catch (error) {
+          console.error(`❌ Error processing image:`, error);
+          stats.errors++;
+          stats.processed++;
+        }
+      }
+
+      // Show summary
+      const totalSavedMB = ((stats.originalSize - stats.compressedSize) / (1024 * 1024)).toFixed(2);
+      const percentSaved = stats.originalSize > 0 
+        ? ((1 - stats.compressedSize / stats.originalSize) * 100).toFixed(1) 
+        : 0;
+
+      let message = `🎉 Optimization Complete!\n\n`;
+      message += `📊 Summary:\n`;
+      message += `• Total images: ${stats.total}\n`;
+      message += `• Compressed: ${stats.compressed}\n`;
+      message += `• Skipped: ${stats.skipped}\n`;
+      message += `• Errors: ${stats.errors}\n`;
+      message += `• Space saved: ${totalSavedMB} MB (${percentSaved}%)\n`;
+
+      toast.success(message, { duration: 10000 });
+
+    } catch (error) {
+      console.error("Fatal error during optimization:", error);
+      toast.error(`Optimization failed: ${error.message}`);
+    } finally {
+      setIsOptimizing(false);
+    }
   };
 
   const handleImport = () => {
@@ -390,6 +545,15 @@ const Products = () => {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
+          <Button 
+            variant="outline" 
+            onClick={handleOptimizeImages}
+            disabled={!products.length || isOptimizing}
+            className="w-full sm:w-auto"
+          >
+            <ImageIcon className="mr-2 h-4 w-4" />
+            {isOptimizing ? "Optimizing..." : "Optimize Images"}
+          </Button>
           <Button 
             variant="outline" 
             onClick={handleImport}
