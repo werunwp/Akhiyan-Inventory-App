@@ -3,6 +3,7 @@ import { Upload, X, Image } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { compressImage } from "@/lib/imageCompression";
 
 interface ImageUploadProps {
   value?: string;
@@ -22,19 +23,26 @@ export const ImageUpload = ({ value, onChange, onRemove, compact = false }: Imag
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) { // 5MB limit
-      toast.error('File size should be less than 5MB');
+    if (file.size > 10 * 1024 * 1024) { // 10MB limit (before compression)
+      toast.error('File size should be less than 10MB');
       return;
     }
 
     setIsUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+      // Compress the image before uploading
+      const compressedBlob = await compressImage(file, 800, 800, 0.8);
+      
+      // Create a new file from the compressed blob
+      const compressedFile = new File(
+        [compressedBlob], 
+        `${Date.now()}-${Math.random().toString(36).substring(2)}.jpg`,
+        { type: 'image/jpeg' }
+      );
       
       const { data, error } = await supabase.storage
         .from('product-images')
-        .upload(fileName, file);
+        .upload(compressedFile.name, compressedFile);
 
       if (error) throw error;
 
@@ -43,7 +51,7 @@ export const ImageUpload = ({ value, onChange, onRemove, compact = false }: Imag
         .getPublicUrl(data.path);
 
       onChange(publicUrl);
-      toast.success('Image uploaded successfully');
+      toast.success('Image uploaded and optimized successfully');
     } catch (error) {
       console.error('Upload error:', error);
       toast.error('Failed to upload image');
@@ -104,6 +112,7 @@ export const ImageUpload = ({ value, onChange, onRemove, compact = false }: Imag
               src={value}
               alt="Variant image"
               className="w-full h-full object-cover"
+              loading="lazy"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).src = '/placeholder.svg'
               }}
@@ -128,6 +137,7 @@ export const ImageUpload = ({ value, onChange, onRemove, compact = false }: Imag
             src={value} 
             alt="Product image" 
             className="w-full h-full object-cover"
+            loading="lazy"
             onError={(e) => {
               (e.currentTarget as HTMLImageElement).src = '/placeholder.svg';
             }}
@@ -212,7 +222,7 @@ export const ImageUpload = ({ value, onChange, onRemove, compact = false }: Imag
                 Drag and drop an image here, or click to select
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Max 5MB • PNG, JPG, WEBP
+                Max 10MB • Auto-optimized to 800px
               </p>
             </>
           )}

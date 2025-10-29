@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImageUpload } from './ImageUpload';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { compressImage } from '@/lib/imageCompression';
 import { 
   Image, 
   Upload, 
@@ -117,19 +118,26 @@ export const ImagePicker = ({
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) { // 5MB limit
-      toast.error('File size should be less than 5MB');
+    if (file.size > 10 * 1024 * 1024) { // 10MB limit (before compression)
+      toast.error('File size should be less than 10MB');
       return;
     }
 
     setIsUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+      // Compress the image before uploading
+      const compressedBlob = await compressImage(file, 800, 800, 0.8);
+      
+      // Create a new file from the compressed blob
+      const compressedFile = new File(
+        [compressedBlob], 
+        `${Date.now()}-${Math.random().toString(36).substring(2)}.jpg`,
+        { type: 'image/jpeg' }
+      );
       
       const { data, error } = await supabase.storage
         .from('product-images')
-        .upload(fileName, file);
+        .upload(compressedFile.name, compressedFile);
 
       if (error) throw error;
 
@@ -143,7 +151,7 @@ export const ImagePicker = ({
       // Select the newly uploaded image
       handleImageSelect(publicUrl);
       
-      toast.success('Image uploaded and selected successfully');
+      toast.success('Image uploaded and optimized successfully');
     } catch (error) {
       console.error('Upload error:', error);
       toast.error('Failed to upload image');
@@ -201,6 +209,7 @@ export const ImagePicker = ({
                   src={value} 
                   alt="Selected" 
                   className={`${iconOnly ? 'w-4 h-4' : 'w-6 h-6'} object-cover rounded`}
+                  loading="lazy"
                   onError={(e) => {
                     e.currentTarget.style.display = 'none';
                   }}
@@ -316,6 +325,7 @@ export const ImagePicker = ({
                             src={image.url}
                             alt={image.name}
                             className="w-full h-full object-cover rounded-lg"
+                            loading="lazy"
                             onError={(e) => {
                               e.currentTarget.style.display = 'none';
                             }}
@@ -344,6 +354,7 @@ export const ImagePicker = ({
                             src={image.url}
                             alt={image.name}
                             className="w-12 h-12 object-cover rounded"
+                            loading="lazy"
                             onError={(e) => {
                               e.currentTarget.style.display = 'none';
                             }}
@@ -383,6 +394,7 @@ export const ImagePicker = ({
                     src={value} 
                     alt="Selected" 
                     className="w-8 h-8 object-cover rounded"
+                    loading="lazy"
                     onError={(e) => {
                       e.currentTarget.style.display = 'none';
                     }}

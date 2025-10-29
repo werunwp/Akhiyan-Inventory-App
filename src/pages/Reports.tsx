@@ -493,6 +493,7 @@ const Reports = () => {
                       src={item.image} 
                       alt={item.productName}
                       className="w-full h-32 object-cover"
+                      loading="lazy"
                       onError={(e) => {
                         e.currentTarget.src = '/placeholder.svg';
                       }}
